@@ -1,0 +1,444 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Hero Of Bits</title>
+<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}body{display:flex;align-items:center;justify-content:center}.s{position:relative}canvas{display:block;image-rendering:pixelated;width:min(100vw,calc(100vh * 16 / 9));height:auto}.s::after{content:"";position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(to bottom,#0000 0 2px,#0004 2px 3px),radial-gradient(ellipse at center,#0000 60%,#0007 100%)}</style>
+</head><body><div class="s"><canvas id="game"></canvas></div>
+<script>
+(function (global) {
+  'use strict';
+  var PALETTE = ['#0b0b14', '#262b44', '#3e4a8a', '#4fa4f7', '#9be2ff', '#1e6b3a', '#45b649', '#a6e05a',
+    '#6b3b22', '#b8743a', '#f2c45a', '#ffffff', '#b5303a', '#ff7a5c', '#8a8aa0', '#f4c7a1'];
+  var PALETTE_NAMES = ['Black', 'Navy', 'Blue', 'Sky', 'Ice', 'Forest', 'Green', 'Lime',
+    'Brown', 'Tan', 'Gold', 'White', 'Red', 'Salmon', 'Gray', 'Skin'];
+  var W = 256, H = 144, TS = 8;
+
+  // 3x5 bitmap font
+  var G = {
+    A: '010101111101101', B: '110101110101110', C: '011100100100011', D: '110101101101110', E: '111100110100111',
+    F: '111100110100100', G: '011100101101011', H: '101101111101101', I: '111010010010111', J: '001001001101010',
+    K: '101101110101101', L: '100100100100111', M: '101111111101101', N: '110101101101101', O: '010101101101010',
+    P: '110101110100100', Q: '010101101110011', R: '110101110101101', S: '011100010001110', T: '111010010010010',
+    U: '101101101101111', V: '101101101101010', W: '101101111111101', X: '101101010101101', Y: '101101010010010',
+    Z: '111001010100111', '0': '111101101101111', '1': '010110010010111', '2': '110001010100111', '3': '110001010001110',
+    '4': '101101111001001', '5': '111100110001110', '6': '011100111101111', '7': '111001010010010', '8': '111101111101111',
+    '9': '111101111001110', ' ': '000000000000000', '!': '010010010000010', '.': '000000000000010', ',': '000000000010100',
+    ':': '000010000010000', '-': '000000111000000', '?': '110001010000010', '/': '001001010100100', "'": '010010000000000',
+    '+': '000010111010000', '=': '000111000111000', '%': '101001010100101', '(': '010100100100010', ')': '010001001001010',
+    '#': '101111101111101', '*': '000101010101000', '<': '001010100010001', '>': '100010001010100', '_': '000000000000111'
+  };
+
+  function drawText(ctx, str, x, y, color, scale) {
+    scale = scale || 1;
+    str = String(str).toUpperCase();
+    ctx.fillStyle = color;
+    var cx = x;
+    for (var i = 0; i < str.length; i++) {
+      var ch = str[i];
+      if (ch === '\n') { y += 6 * scale; cx = x; continue; }
+      var g = G[ch] || G['?'];
+      for (var p = 0; p < 15; p++) if (g[p] === '1') ctx.fillRect(cx + (p % 3) * scale, y + ((p / 3) | 0) * scale, scale, scale);
+      cx += 4 * scale;
+    }
+  }
+  function textWidth(str, scale) { return Math.max(0, String(str).length * 4 * (scale || 1) - (scale || 1)); }
+
+  var cache = new Map();
+  function spriteCanvas(s) {
+    if (!s || !s.px) return null;
+    var sig = s.px.join('');
+    var e = cache.get(s.id);
+    if (e && e.sig === sig) return e.c;
+    var c = document.createElement('canvas');
+    c.width = c.height = TS;
+    var x = c.getContext('2d');
+    for (var yy = 0; yy < TS; yy++) for (var xx = 0; xx < TS; xx++) {
+      var ch = (s.px[yy] || '')[xx];
+      if (ch && ch !== '.') { x.fillStyle = PALETTE[parseInt(ch, 16)]; x.fillRect(xx, yy, 1, 1); }
+    }
+    cache.set(s.id, { sig: sig, c: c });
+    return c;
+  }
+
+  // ---- chiptune audio ----
+  var AC = null, noiseBuf = null;
+  function audio() {
+    if (!AC) { try { AC = new (global.AudioContext || global.webkitAudioContext)(); } catch (e) { return null; } }
+    if (AC.state === 'suspended') AC.resume();
+    return AC;
+  }
+  function playSound(snd) {
+    var ac = audio(); if (!ac || !snd) return;
+    var t = ac.currentTime;
+    var vol = Math.max(0, Math.min(1, +snd.vol || 0.3));
+    var dur = Math.max(0.02, +snd.dur || 0.2);
+    var f0 = Math.max(20, +snd.f0 || 440), f1 = Math.max(20, +snd.f1 || 440);
+    var g = ac.createGain();
+    g.gain.setValueAtTime(vol * 0.45, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    g.connect(ac.destination);
+    var src;
+    if (snd.wave === 'noise') {
+      if (!noiseBuf) {
+        noiseBuf = ac.createBuffer(1, ac.sampleRate, ac.sampleRate);
+        var d = noiseBuf.getChannelData(0);
+        for (var i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+      }
+      src = ac.createBufferSource(); src.buffer = noiseBuf; src.loop = true;
+      src.playbackRate.setValueAtTime(Math.max(0.05, f0 / 440), t);
+      src.playbackRate.exponentialRampToValueAtTime(Math.max(0.05, f1 / 440), t + dur);
+    } else {
+      src = ac.createOscillator(); src.type = snd.wave || 'square';
+      src.frequency.setValueAtTime(f0, t);
+      src.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    }
+    src.connect(g); src.start(t); src.stop(t + dur + 0.03);
+  }
+
+  function num(v, d) { var n = parseFloat(v); return isNaN(n) ? (d || 0) : n; }
+  function hasTag(a, t) {
+    if (!t) return true;
+    var want = String(t).trim().toLowerCase();
+    return String(a.tags || '').split(',').some(function (x) { return x.trim().toLowerCase() === want; });
+  }
+  function clone(o) { return JSON.parse(JSON.stringify(o)); }
+
+  // ---- the game instance ----
+  function create(canvas, project, opts) {
+    opts = opts || {};
+    var P = clone(project);
+    canvas.width = W; canvas.height = H;
+    var ctx = canvas.getContext('2d');
+    ctx.imageSmoothingEnabled = false;
+    var spr = {}, snd = {};
+    P.sprites.forEach(function (s) { spr[s.id] = s; });
+    (P.sounds || []).forEach(function (s) { snd[s.id] = s; });
+    var log = opts.onLog || function () {};
+
+    var vars = {}, L = null, levelIdx = 0, actors = [], runners = [], particles = [], prints = [], big = null;
+    var cam = { x: 0, y: 0 }, shake = 0, shakeAmt = 0, frame = 0, overlaps = new Set(), uid = 1;
+    var pendingLevel = null, ended = false, running = true, raf = 0, last = 0, acc = 0, title = !!opts.title;
+    var keys = {}, pressed = {};
+
+    function resetVars() { vars = {}; var v = P.vars || {}; for (var k in v) vars[k] = num(v[k]); }
+    function fmt(s) {
+      return String(s == null ? '' : s).replace(/\\n/g, '\n').replace(/\{(\w+)\}/g, function (m, k) { return k in vars ? vars[k] : 0; });
+    }
+
+    function spawnActor(def, x, y) {
+      var a = clone(def);
+      a.uid = uid++; a.x = x; a.y = y; a.vx = 0; a.vy = 0; a.ground = false; a.dir = 1; a.dead = false; a.fell = false;
+      a.comps = a.comps || {}; a.bp = a.bp || { nodes: [] }; a.nm = {}; a.timers = [];
+      (a.bp.nodes || []).forEach(function (n) { a.nm[n.id] = n; n.p = n.p || {}; if (n.kind === 'Timer') a.timers.push({ node: n, t: 0 }); });
+      actors.push(a);
+      return a;
+    }
+    function fire(a, kind, other, filter) {
+      var ns = a.bp.nodes;
+      for (var i = 0; i < ns.length; i++) {
+        var n = ns[i];
+        if (n.kind === kind && (!filter || filter(n)) && n.next) runners.push({ a: a, other: other, id: n.next, wait: 0 });
+      }
+    }
+    function hasHandler(a, kind) { return a.bp.nodes.some(function (n) { return n.kind === kind; }); }
+
+    function camTarget() {
+      return actors.find(function (a) { return !a.dead && (a.comps.platformer || a.comps.topdown); }) ||
+        actors.find(function (a) { return !a.dead && hasTag(a, 'player'); });
+    }
+    function camGoal(t) {
+      return {
+        x: Math.max(0, Math.min(t.x + 4 - W / 2, L.w * TS - W)),
+        y: Math.max(0, Math.min(t.y + 4 - H / 2, L.h * TS - H))
+      };
+    }
+
+    function loadLevel(i) {
+      L = clone(P.levels[i]); levelIdx = i;
+      actors = []; runners = []; particles = []; overlaps = new Set(); big = null;
+      L.actors.forEach(function (d) { if (!d.template) spawnActor(d, d.x, d.y); });
+      var t = camTarget();
+      if (t) { var g = camGoal(t); cam.x = g.x; cam.y = g.y; } else { cam.x = 0; cam.y = 0; }
+      actors.slice().forEach(function (a) { fire(a, 'BeginPlay'); });
+      log('Loaded level "' + L.name + '"');
+    }
+
+    function solidAt(px, py) {
+      var tx = Math.floor(px / TS), ty = Math.floor(py / TS);
+      if (tx < 0 || tx >= L.w) return true;
+      if (ty < 0 || ty >= L.h) return false;
+      var id = L.tiles[ty * L.w + tx];
+      return !!(id && spr[id] && spr[id].solid);
+    }
+    function boxSolid(x, y, w, h) {
+      return solidAt(x, y) || solidAt(x + w - 0.01, y) || solidAt(x, y + h - 0.01) || solidAt(x + w - 0.01, y + h - 0.01);
+    }
+
+    var K = {
+      left: function () { return keys.ArrowLeft || keys.KeyA; }, right: function () { return keys.ArrowRight || keys.KeyD; },
+      up: function () { return keys.ArrowUp || keys.KeyW; }, down: function () { return keys.ArrowDown || keys.KeyS; },
+      jumpP: function () { return pressed.Space || pressed.KeyZ || pressed.ArrowUp || pressed.KeyW; },
+      jumpH: function () { return keys.Space || keys.KeyZ || keys.ArrowUp || keys.KeyW; }
+    };
+
+    function physics(a) {
+      var c = a.comps;
+      if (!(c.physics || c.platformer || c.topdown || c.patrol)) return;
+      if (a.fell) return;
+      if (c.platformer) {
+        var dx = (K.right() ? 1 : 0) - (K.left() ? 1 : 0);
+        a.vx = dx * num(c.platformer.speed, 1.2);
+        if (dx) a.dir = dx;
+        if (K.jumpP() && a.ground) {
+          a.vy = -num(c.platformer.jump, 3.6); a.ground = false;
+          if (c.platformer.jumpSound) playSound(snd[c.platformer.jumpSound]);
+        }
+        if (!K.jumpH() && a.vy < -1) a.vy *= 0.6;
+      }
+      if (c.topdown) {
+        var tx = (K.right() ? 1 : 0) - (K.left() ? 1 : 0), ty = (K.down() ? 1 : 0) - (K.up() ? 1 : 0);
+        var sp = num(c.topdown.speed, 1);
+        if (tx && ty) sp *= 0.7071;
+        a.vx = tx * sp; a.vy = ty * sp;
+        if (tx) a.dir = tx;
+      }
+      if (c.patrol) a.vx = a.dir * num(c.patrol.speed, 0.5);
+      var grav = c.physics ? num(c.physics.gravity, 0.22) : (c.platformer ? 0.22 : 0);
+      if (grav) a.vy = Math.min(4, a.vy + grav);
+
+      a.ground = false;
+      var hitWall = false;
+      a.x += a.vx;
+      if (boxSolid(a.x + 1, a.y, 6, 8)) {
+        if (a.vx > 0) a.x = Math.floor((a.x + 7 - 0.001) / TS) * TS - 7;
+        else if (a.vx < 0) a.x = Math.floor((a.x + 1) / TS) * TS + TS - 1;
+        hitWall = a.vx !== 0; a.vx = 0;
+      }
+      a.y += a.vy;
+      if (boxSolid(a.x + 1, a.y, 6, 8)) {
+        if (a.vy > 0) { a.y = Math.floor((a.y + 8 - 0.001) / TS) * TS - 8; a.ground = true; }
+        else if (a.vy < 0) a.y = Math.floor(a.y / TS) * TS + TS;
+        a.vy = 0;
+      }
+      if (c.patrol) {
+        if (hitWall) a.dir *= -1;
+        else if (c.patrol.edges !== false && a.ground) {
+          var fx = a.dir > 0 ? a.x + 7.5 : a.x + 0.5;
+          if (!solidAt(fx, a.y + 9)) a.dir *= -1;
+        }
+      }
+      if (a.y > L.h * TS + 24) {
+        a.fell = true;
+        if (hasHandler(a, 'FellOutOfWorld')) fire(a, 'FellOutOfWorld');
+        else if (c.platformer || c.topdown) pendingLevel = levelIdx;
+        else a.dead = true;
+      }
+    }
+
+    function overlap(a, b) { return a.x + 1 < b.x + 7 && b.x + 1 < a.x + 7 && a.y < b.y + 8 && b.y < a.y + 8; }
+
+    function burst(x, y, color, count) {
+      for (var i = 0; i < count; i++) {
+        var ang = Math.random() * Math.PI * 2, sp = 0.5 + Math.random() * 1.6;
+        particles.push({ x: x, y: y, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp - 0.6, life: 20 + Math.random() * 20, c: PALETTE[color & 15] });
+      }
+    }
+
+    function exec(r, n) {
+      var p = n.p || {}, a = r.a, o = r.other;
+      var tgt = p.target === 'other' ? o : a;
+      switch (n.kind) {
+        case 'Print': prints.push({ t: fmt(p.text), life: 150 }); log('[' + a.name + '] ' + fmt(p.text), 'bp'); break;
+        case 'ShowMessage': big = { t: fmt(p.text), life: Math.round(num(p.seconds, 2) * 60) }; break;
+        case 'SetVar': if (p.var) vars[p.var] = num(p.value); break;
+        case 'AddVar': if (p.var) vars[p.var] = (vars[p.var] || 0) + num(p.amount, 1); break;
+        case 'Branch': {
+          var v = vars[p.var] || 0, x = num(p.value), ok;
+          switch (p.op) { case '==': ok = v === x; break; case '!=': ok = v !== x; break; case '>': ok = v > x; break;
+            case '<': ok = v < x; break; case '<=': ok = v <= x; break; default: ok = v >= x; }
+          return { next: ok ? n.next : n.nextFalse };
+        }
+        case 'IfOtherAbove': {
+          var st = !!(o && o.vy > 0 && o.y + 8 <= a.y + 5);
+          return { next: st ? n.next : n.nextFalse };
+        }
+        case 'Chance': return { next: Math.random() * 100 < num(p.percent, 50) ? n.next : n.nextFalse };
+        case 'MoveBy': if (tgt) { tgt.x += num(p.dx); tgt.y += num(p.dy); } break;
+        case 'SetVelocity': if (tgt) {
+          if (p.vx !== '' && p.vx != null) tgt.vx = num(p.vx);
+          if (p.vy !== '' && p.vy != null) tgt.vy = num(p.vy);
+        } break;
+        case 'Jump': if (tgt && (tgt.ground || p.air)) { tgt.vy = -num(p.force, 3.5); tgt.ground = false; } break;
+        case 'FlipDirection': if (tgt) tgt.dir *= -1; break;
+        case 'Teleport': if (tgt) { tgt.x = num(p.x); tgt.y = num(p.y); tgt.vx = tgt.vy = 0; } break;
+        case 'Destroy': if (tgt) tgt.dead = true; break;
+        case 'Spawn': {
+          var d = L.actors.find(function (z) { return z.name === p.actor; });
+          if (d) { var s = spawnActor(d, a.x + num(p.dx) * (a.dir < 0 ? -1 : 1), a.y + num(p.dy)); s.dir = a.dir; fire(s, 'BeginPlay'); }
+          else log('Spawn: no actor named "' + p.actor + '" in this level', 'warn');
+        } break;
+        case 'SetSprite': if (tgt && spr[p.sprite]) tgt.sprite = p.sprite; break;
+        case 'PlaySound': playSound(snd[p.sound]); break;
+        case 'Particles': burst(a.x + 4, a.y + 4, num(p.color, 10), num(p.count, 8)); break;
+        case 'CameraShake': shake = Math.round(num(p.frames, 15)); shakeAmt = num(p.strength, 2); break;
+        case 'LoadLevel': {
+          var i = -1;
+          if (p.level === '__next') i = levelIdx + 1;
+          else if (p.level === '__restart') i = levelIdx;
+          else if (p.level === '__first') i = 0;
+          else i = P.levels.findIndex(function (l) { return l.id === p.level; });
+          if (i >= P.levels.length) { ended = true; big = { t: fmt(p.endText || 'THE END'), life: 1e9 }; log('Game finished'); }
+          else if (i >= 0) pendingLevel = i;
+          else log('LoadLevel: level not found', 'warn');
+        } break;
+        case 'Delay': return { next: n.next, wait: Math.max(1, Math.round(num(p.seconds, 1) * 60)) };
+      }
+      return { next: n.next };
+    }
+
+    function stepRunners() {
+      var list = runners; runners = [];
+      for (var i = 0; i < list.length; i++) {
+        var r = list[i];
+        if (r.wait > 0) { r.wait--; if (r.wait > 0) { runners.push(r); continue; } }
+        var steps = 0;
+        while (r.id && steps++ < 128) {
+          var n = r.a.nm[r.id];
+          if (!n) { r.id = null; break; }
+          var res = exec(r, n);
+          r.id = res.next;
+          if (pendingLevel !== null) return;
+          if (res.wait) { r.wait = res.wait; break; }
+        }
+        if (r.id) runners.push(r);
+      }
+    }
+
+    function update() {
+      if (title) {
+        if (Object.keys(pressed).length) { title = false; audio(); }
+        pressed = {};
+        return;
+      }
+      frame++;
+      if (!ended) {
+        var live = actors.slice();
+        Object.keys(pressed).forEach(function (code) {
+          live.forEach(function (a) { if (!a.dead) fire(a, 'KeyPressed', null, function (n) { return n.p.key === code; }); });
+        });
+        live.forEach(function (a) {
+          if (a.dead) return;
+          fire(a, 'Tick', null, function (n) { return frame % Math.max(1, Math.round(num(n.p.every, 1))) === 0; });
+          a.timers.forEach(function (tm) {
+            if (tm.done) return;
+            tm.t++;
+            if (tm.t >= Math.max(1, num(tm.node.p.seconds, 1) * 60)) {
+              tm.t = 0; if (!tm.node.p.loop) tm.done = true;
+              if (tm.node.next) runners.push({ a: a, other: null, id: tm.node.next, wait: 0 });
+            }
+          });
+        });
+        actors.forEach(function (a) { if (!a.dead) physics(a); });
+        var now = new Set(), al = actors.filter(function (a) { return !a.dead; });
+        for (var i = 0; i < al.length; i++) for (var j = i + 1; j < al.length; j++) {
+          var A = al[i], B = al[j];
+          if (!overlap(A, B)) continue;
+          var k = A.uid + '_' + B.uid;
+          now.add(k);
+          if (!overlaps.has(k)) {
+            fire(A, 'Overlap', B, function (n) { return hasTag(B, n.p.tag); });
+            fire(B, 'Overlap', A, function (n) { return hasTag(A, n.p.tag); });
+          }
+        }
+        overlaps = now;
+        stepRunners();
+      }
+      actors = actors.filter(function (a) { return !a.dead; });
+      particles.forEach(function (q) { q.x += q.vx; q.y += q.vy; q.vy += 0.08; q.life--; });
+      particles = particles.filter(function (q) { return q.life > 0; });
+      prints.forEach(function (q) { q.life--; }); prints = prints.filter(function (q) { return q.life > 0; }).slice(-6);
+      if (big && !ended) { big.life--; if (big.life <= 0) big = null; }
+      if (shake > 0) shake--;
+      var t = camTarget();
+      if (t) { var g = camGoal(t); cam.x += (g.x - cam.x) * 0.18; cam.y += (g.y - cam.y) * 0.18; }
+      if (pendingLevel !== null) { var nl = pendingLevel; pendingLevel = null; loadLevel(nl); }
+      pressed = {};
+    }
+
+    function shadowText(s, x, y, col, sc) { drawText(ctx, s, x + 1, y + 1, PALETTE[0], sc); drawText(ctx, s, x, y, col, sc); }
+
+    function render() {
+      ctx.fillStyle = PALETTE[L ? L.bg : 0]; ctx.fillRect(0, 0, W, H);
+      if (title) {
+        var nm = String(P.name || 'GAME').toUpperCase(), sc = textWidth(nm, 2) < W - 16 ? 2 : 1;
+        shadowText(nm, ((W - textWidth(nm, sc)) / 2) | 0, 50, PALETTE[10], sc);
+        if ((Date.now() / 500 | 0) % 2) shadowText('PRESS ANY KEY', ((W - textWidth('PRESS ANY KEY')) / 2) | 0, 84, PALETTE[11]);
+        drawText(ctx, 'MADE WITH BITFORGE 8', ((W - textWidth('MADE WITH BITFORGE 8')) / 2) | 0, 130, PALETTE[1]);
+        return;
+      }
+      var cx = Math.round(cam.x), cy = Math.round(cam.y);
+      if (shake > 0) { cx += Math.round((Math.random() * 2 - 1) * shakeAmt); cy += Math.round((Math.random() * 2 - 1) * shakeAmt); }
+      var x0 = Math.max(0, Math.floor(cx / TS)), y0 = Math.max(0, Math.floor(cy / TS));
+      for (var ty = y0; ty < Math.min(L.h, y0 + H / TS + 2); ty++) for (var tx = x0; tx < Math.min(L.w, x0 + W / TS + 2); tx++) {
+        var id = L.tiles[ty * L.w + tx];
+        if (id && spr[id]) ctx.drawImage(spriteCanvas(spr[id]), tx * TS - cx, ty * TS - cy);
+      }
+      actors.forEach(function (a) {
+        var c = spriteCanvas(spr[a.sprite]); if (!c) return;
+        var px = Math.round(a.x) - cx, py = Math.round(a.y) - cy;
+        if (a.dir < 0) { ctx.save(); ctx.translate(px + TS, py); ctx.scale(-1, 1); ctx.drawImage(c, 0, 0); ctx.restore(); }
+        else ctx.drawImage(c, px, py);
+      });
+      particles.forEach(function (q) { ctx.fillStyle = q.c; ctx.fillRect(Math.round(q.x) - cx, Math.round(q.y) - cy, 1, 1); });
+      if (P.hud) shadowText(fmt(P.hud), 3, 3, PALETTE[11]);
+      prints.forEach(function (q, i) { shadowText(q.t, 3, 12 + i * 7, PALETTE[4]); });
+      if (big) {
+        var lines = big.t.split('\n'), longest = Math.max.apply(null, lines.map(function (l) { return l.length; }));
+        var s2 = longest * 8 <= W - 24 ? 2 : 1, bh = lines.length * 6 * s2 + 10, bw = textWidth('x'.repeat(longest), s2) + 16;
+        var bx = ((W - bw) / 2) | 0, by = ((H - bh) / 2) | 0;
+        ctx.fillStyle = PALETTE[0]; ctx.fillRect(bx, by, bw, bh);
+        ctx.fillStyle = PALETTE[11]; ctx.fillRect(bx, by, bw, 1); ctx.fillRect(bx, by + bh - 1, bw, 1); ctx.fillRect(bx, by, 1, bh); ctx.fillRect(bx + bw - 1, by, 1, bh);
+        lines.forEach(function (l, i) { drawText(ctx, l, ((W - textWidth(l, s2)) / 2) | 0, by + 5 + i * 6 * s2, PALETTE[10], s2); });
+      }
+    }
+
+    function loop(t) {
+      if (!running) return;
+      if (!last) last = t;
+      acc += Math.min(100, t - last); last = t;
+      while (acc >= 1000 / 60) { update(); acc -= 1000 / 60; }
+      render();
+      raf = requestAnimationFrame(loop);
+    }
+
+    var GAME_KEYS = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Space'];
+    function kd(e) {
+      if (e.target && /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
+      if (GAME_KEYS.indexOf(e.code) >= 0) e.preventDefault();
+      if (!keys[e.code]) pressed[e.code] = true;
+      keys[e.code] = true;
+    }
+    function ku(e) { keys[e.code] = false; }
+    function bl() { keys = {}; }
+    global.addEventListener('keydown', kd);
+    global.addEventListener('keyup', ku);
+    global.addEventListener('blur', bl);
+
+    resetVars();
+    var start = typeof opts.startLevel === 'number' ? opts.startLevel : Math.max(0, P.levels.findIndex(function (l) { return l.id === (P.settings || {}).startLevel; }));
+    loadLevel(Math.min(start, P.levels.length - 1));
+    raf = requestAnimationFrame(loop);
+
+    return {
+      stop: function () {
+        running = false; cancelAnimationFrame(raf);
+        global.removeEventListener('keydown', kd); global.removeEventListener('keyup', ku); global.removeEventListener('blur', bl);
+      },
+      debug: function () { return { vars: vars, level: L && L.name, actors: actors, ended: ended, frame: frame }; }
+    };
+  }
+
+  global.PixelRuntime = { PALETTE: PALETTE, PALETTE_NAMES: PALETTE_NAMES, W: W, H: H, TS: TS, drawText: drawText, spriteCanvas: spriteCanvas, playSound: playSound, create: create };
+})(window);
+</script>
+<script>PixelRuntime.create(document.getElementById('game'), {"format":"bitforge8","version":1,"name":"Hero Of Bits","hud":"SCORE {score}   LIVES {lives}","vars":{"score":0,"lives":3},"settings":{"crt":true,"startLevel":"l7bgcwc5"},"sprites":[{"id":"smub58yb","name":"Hero","px":["6.cccc..",".cccccc.","..ffff..",".f0ff0f.","..ffff..",".222222.",".2.22.2.",".88..88."],"solid":false},{"id":"sfzf9871","name":"Grass","px":["77677767","66666666","86868686","88988898","89888988","88898889","98888898","88988888"],"solid":true},{"id":"s5n94w9u","name":"Dirt","px":["88988898","89888988","88898889","98888898","88988888","88889888","89888898","88898888"],"solid":true},{"id":"sbno9k8u","name":"Brick","px":["99999998","99999998","88888888","99989999","99989999","88888888","99999998","99999998"],"solid":true},{"id":"s63ux348","name":"Gold Block","px":["aaaaaaa8","ab8aa8a8","aaaaaaa8","aaa88aa8","aaaaaaa8","ab8aa8a8","aaaaaaa8","88888888"],"solid":true},{"id":"snrifh28","name":"Coin","px":["...aa...","..abba..",".aabaaa.",".aabaaa.",".aabaaa.",".aaaaaa.","..aaaa..","...aa..."],"solid":false},{"id":"savmattd","name":"Slime","px":["........","..6666..",".666666.","66b66b66","66066066","66666666",".666666.","........"],"solid":false},{"id":"sdl39xe8","name":"Flag","px":["bc......","bccc....","bccccc..","bccc....","bc......","b.......","b.......","e......."],"solid":false},{"id":"svx8t320","name":"Cloud","px":["........","...bb...",".bbbbbb.","bbbbbbbb","bbbbbbbb",".b4bb4b.","........","........"],"solid":false},{"id":"sfihyeqb","name":"Bush","px":["........","........","...66...","..6776..",".667666.","66666766","65666656","55555555"],"solid":false},{"id":"sm2vy1kg","name":"Fireball","px":["........","...dd...","..dada..",".daaaad.",".dabbad.","..daad..","...dd...","........"],"solid":false}],"sounds":[{"id":"a9587pfl","name":"Jump","wave":"square","f0":280,"f1":720,"dur":0.16,"vol":0.3},{"id":"ayx8ujrv","name":"Coin","wave":"square","f0":990,"f1":1980,"dur":0.12,"vol":0.25},{"id":"ae344q0o","name":"Hit","wave":"sawtooth","f0":420,"f1":60,"dur":0.32,"vol":0.35},{"id":"afiu3bmu","name":"Stomp","wave":"triangle","f0":520,"f1":90,"dur":0.16,"vol":0.5},{"id":"au2gyfnb","name":"Power Up","wave":"square","f0":260,"f1":1560,"dur":0.55,"vol":0.28},{"id":"ap4wrvac","name":"Explosion","wave":"noise","f0":900,"f1":50,"dur":0.5,"vol":0.5},{"id":"a7ccs1j1","name":"Laser","wave":"sawtooth","f0":1500,"f1":220,"dur":0.18,"vol":0.2}],"levels":[{"id":"l7bgcwc5","name":"Green Hills","w":64,"h":18,"bg":3,"tiles":[null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,"svx8t320","svx8t320","svx8t320",null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,"svx8t320","svx8t320",null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,"svx8t320","svx8t320",null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,"svx8t320","svx8t320",null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,"svx8t320","svx8t320",null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,"s63ux348",null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,"sbno9k8u","sbno9k8u","sbno9k8u","sbno9k8u",null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,"sbno9k8u","sbno9k8u","sbno9k8u","sbno9k8u",null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,"sbno9k8u","sbno9k8u","sbno9k8u","sbno9k8u",null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,"sbno9k8u","sbno9k8u","sbno9k8u","sbno9k8u",null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,"s63ux348",null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,"s63ux348","s63ux348",null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,"s63ux348","s63ux348","s63ux348",null,null,null,null,null,null,null,null,null,"sfihyeqb",null,null,null,null,null,null,null,null,"sfihyeqb",null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,"sfihyeqb",null,null,null,null,null,null,null,null,null,null,null,null,null,"sfihyeqb",null,null,null,"s63ux348","s63ux348","s63ux348","s63ux348",null,null,null,null,null,null,"sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871",null,null,null,"sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871",null,null,"sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u",null,null,null,"s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u",null,null,"s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u"],"actors":[{"id":"okiu02j8","name":"Player","sprite":"smub58yb","x":16,"y":120,"tags":"player","template":false,"comps":{"physics":{"gravity":0.22},"platformer":{"speed":1.2,"jump":3.6,"jumpSound":"a9587pfl"}},"bp":{"nodes":[{"id":"n5670juf","kind":"FellOutOfWorld","x":40,"y":40,"p":{},"next":"nxmj56gy","nextFalse":null},{"id":"nxmj56gy","kind":"PlaySound","x":290,"y":40,"p":{"sound":"ae344q0o"},"next":"nzu9eziy","nextFalse":null},{"id":"nzu9eziy","kind":"CameraShake","x":540,"y":40,"p":{"strength":3,"frames":20},"next":"ni6nkbk8","nextFalse":null},{"id":"ni6nkbk8","kind":"AddVar","x":790,"y":40,"p":{"var":"lives","amount":-1},"next":"nmtw74gu","nextFalse":null},{"id":"nmtw74gu","kind":"Branch","x":1040,"y":40,"p":{"var":"lives","op":">","value":0},"next":"n5ta1jg7","nextFalse":"n3a12gxu"},{"id":"n5ta1jg7","kind":"LoadLevel","x":1290,"y":40,"p":{"level":"__restart","endText":"YOU WIN!\\nSCORE {score}"},"next":null,"nextFalse":null},{"id":"n3a12gxu","kind":"ShowMessage","x":1290,"y":230,"p":{"text":"GAME OVER","seconds":2},"next":"n368z06n","nextFalse":null},{"id":"n368z06n","kind":"Delay","x":1540,"y":230,"p":{"seconds":2},"next":"npyxcryj","nextFalse":null},{"id":"npyxcryj","kind":"SetVar","x":1790,"y":230,"p":{"var":"lives","value":3},"next":"nobq2zwc","nextFalse":null},{"id":"nobq2zwc","kind":"SetVar","x":2040,"y":230,"p":{"var":"score","value":0},"next":"n6b4eq9n","nextFalse":null},{"id":"n6b4eq9n","kind":"LoadLevel","x":2290,"y":230,"p":{"level":"__first","endText":"YOU WIN!\\nSCORE {score}"},"next":null,"nextFalse":null},{"id":"n4mnchv1","kind":"BeginPlay","x":40,"y":470,"p":{},"next":"n9q2ahm7","nextFalse":null},{"id":"n9q2ahm7","kind":"Print","x":290,"y":470,"p":{"text":"BEGIN PLAY! SCORE {score}"},"next":null,"nextFalse":null},{"id":"nmtfd5bi","kind":"KeyPressed","x":40,"y":620,"p":{"key":"KeyX"},"next":"nbtycj2z","nextFalse":null},{"id":"nbtycj2z","kind":"Spawn","x":290,"y":620,"p":{"actor":"Fireball","dx":6,"dy":0},"next":"neopeogs","nextFalse":null},{"id":"neopeogs","kind":"PlaySound","x":540,"y":620,"p":{"sound":"a7ccs1j1"},"next":null,"nextFalse":null}]}},{"id":"ocdjsl96","name":"Fireball","sprite":"sm2vy1kg","x":0,"y":8,"tags":"fireball","template":true,"comps":{"patrol":{"speed":2.4,"edges":false},"physics":{"gravity":0.12}},"bp":{"nodes":[{"id":"nvunhztj","kind":"BeginPlay","x":40,"y":60,"p":{},"next":"n4ik8nz7","nextFalse":null},{"id":"nlwl2ldc","kind":"Timer","x":40,"y":220,"p":{"seconds":1.2,"loop":false},"next":"n81arzlq","nextFalse":null},{"id":"n81arzlq","kind":"Destroy","x":290,"y":220,"p":{"target":"self"},"next":null,"nextFalse":null},{"id":"n4ik8nz7","kind":"SetVelocity","x":290,"y":60,"p":{"target":"self","vx":"","vy":-1},"next":null,"nextFalse":null}]}},{"id":"oliya5uy","name":"Coin","sprite":"snrifh28","x":72,"y":88,"tags":"pickup","template":false,"comps":{},"bp":{"nodes":[{"id":"nxncgkwj","kind":"Overlap","x":40,"y":60,"p":{"tag":"player"},"next":"n0e11jsw","nextFalse":null},{"id":"n0e11jsw","kind":"AddVar","x":290,"y":60,"p":{"var":"score","amount":10},"next":"nfmvzfwr","nextFalse":null},{"id":"nfmvzfwr","kind":"PlaySound","x":540,"y":60,"p":{"sound":"ayx8ujrv"},"next":"n2ypj1bh","nextFalse":null},{"id":"n2ypj1bh","kind":"Particles","x":790,"y":60,"p":{"color":10,"count":10},"next":"nw8tnu1d","nextFalse":null},{"id":"nw8tnu1d","kind":"Destroy","x":1040,"y":60,"p":{"target":"self"},"next":null,"nextFalse":null}]}},{"id":"ozpjtrsk","name":"Coin","sprite":"snrifh28","x":80,"y":88,"tags":"pickup","template":false,"comps":{},"bp":{"nodes":[{"id":"nbstdxiy","kind":"Overlap","x":40,"y":60,"p":{"tag":"player"},"next":"nn15lzp8","nextFalse":null},{"id":"nn15lzp8","kind":"AddVar","x":290,"y":60,"p":{"var":"score","amount":10},"next":"n9rfdm1a","nextFalse":null},{"id":"n9rfdm1a","kind":"PlaySound","x":540,"y":60,"p":{"sound":"ayx8ujrv"},"next":"nph6j8fz","nextFalse":null},{"id":"nph6j8fz","kind":"Particles","x":790,"y":60,"p":{"color":10,"count":10},"next":"nhvv4dtb","nextFalse":null},{"id":"nhvv4dtb","kind":"Destroy","x":1040,"y":60,"p":{"target":"self"},"next":null,"nextFalse":null}]}},{"id":"oqmbttq3","name":"Coin","sprite":"snrifh28","x":160,"y":104,"tags":"pickup","template":false,"comps":{},"bp":{"nodes":[{"id":"ne08ykpy","kind":"Overlap","x":40,"y":60,"p":{"tag":"player"},"next":"nfwdarzh","nextFalse":null},{"id":"nfwdarzh","kind":"AddVar","x":290,"y":60,"p":{"var":"score","amount":10},"next":"nk2l7ngv","nextFalse":null},{"id":"nk2l7ngv","kind":"PlaySound","x":540,"y":60,"p":{"sound":"ayx8ujrv"},"next":"nrcgqpch","nextFalse":null},{"id":"nrcgqpch","kind":"Particles","x":790,"y":60,"p":{"color":10,"count":10},"next":"n3hgwu31","nextFalse":null},{"id":"n3hgwu31","kind":"Destroy","x":1040,"y":60,"p":{"target":"self"},"next":null,"nextFalse":null}]}},{"id":"outcau70","name":"Coin","sprite":"snrifh28","x":168,"y":96,"tags":"pickup","template":false,"comps":{},"bp":{"nodes":[{"id":"n0dvzjz0","kind":"Overlap","x":40,"y":60,"p":{"tag":"player"},"next":"n88s35o6","nextFalse":null},{"id":"n88s35o6","kind":"AddVar","x":290,"y":60,"p":{"var":"score","amount":10},"next":"ngi77xem","nextFalse":null},{"id":"ngi77xem","kind":"PlaySound","x":540,"y":60,"p":{"sound":"ayx8ujrv"},"next":"ngy9ch7n","nextFalse":null},{"id":"ngy9ch7n","kind":"Particles","x":790,"y":60,"p":{"color":10,"count":10},"next":"n3x032oj","nextFalse":null},{"id":"n3x032oj","kind":"Destroy","x":1040,"y":60,"p":{"target":"self"},"next":null,"nextFalse":null}]}},{"id":"otnmlvjc","name":"Coin","sprite":"snrifh28","x":176,"y":104,"tags":"pickup","template":false,"comps":{},"bp":{"nodes":[{"id":"npi586u5","kind":"Overlap","x":40,"y":60,"p":{"tag":"player"},"next":"n74kyoyg","nextFalse":null},{"id":"n74kyoyg","kind":"AddVar","x":290,"y":60,"p":{"var":"score","amount":10},"next":"n1lhm8yo","nextFalse":null},{"id":"n1lhm8yo","kind":"PlaySound","x":540,"y":60,"p":{"sound":"ayx8ujrv"},"next":"nsv8qukp","nextFalse":null},{"id":"nsv8qukp","kind":"Particles","x":790,"y":60,"p":{"color":10,"count":10},"next":"nt3r6x7t","nextFalse":null},{"id":"nt3r6x7t","kind":"Destroy","x":1040,"y":60,"p":{"target":"self"},"next":null,"nextFalse":null}]}},{"id":"o1iu90ba","name":"Coin","sprite":"snrifh28","x":208,"y":72,"tags":"pickup","template":false,"comps":{},"bp":{"nodes":[{"id":"nplq2n6m","kind":"Overlap","x":40,"y":60,"p":{"tag":"player"},"next":"nc755otv","nextFalse":null},{"id":"nc755otv","kind":"AddVar","x":290,"y":60,"p":{"var":"score","amount":10},"next":"n0qylwqr","nextFalse":null},{"id":"n0qylwqr","kind":"PlaySound","x":540,"y":60,"p":{"sound":"ayx8ujrv"},"next":"nu9z69hf","nextFalse":null},{"id":"nu9z69hf","kind":"Particles","x":790,"y":60,"p":{"color":10,"count":10},"next":"nbh5vqvz","nextFalse":null},{"id":"nbh5vqvz","kind":"Destroy","x":1040,"y":60,"p":{"target":"self"},"next":null,"nextFalse":null}]}},{"id":"ooine8ok","name":"Coin","sprite":"snrifh28","x":216,"y":72,"tags":"pickup","template":false,"comps":{},"bp":{"nodes":[{"id":"nstmkc1k","kind":"Overlap","x":40,"y":60,"p":{"tag":"player"},"next":"nhz1ys3t","nextFalse":null},{"id":"nhz1ys3t","kind":"AddVar","x":290,"y":60,"p":{"var":"score","amount":10},"next":"nlolph4j","nextFalse":null},{"id":"nlolph4j","kind":"PlaySound","x":540,"y":60,"p":{"sound":"ayx8ujrv"},"next":"nagxtm27","nextFalse":null},{"id":"nagxtm27","kind":"Particles","x":790,"y":60,"p":{"color":10,"count":10},"next":"nvdp9gq9","nextFalse":null},{"id":"nvdp9gq9","kind":"Destroy","x":1040,"y":60,"p":{"target":"self"},"next":null,"nextFalse":null}]}},{"id":"ozx6t8ga","name":"Coin","sprite":"snrifh28","x":264,"y":88,"tags":"pickup","template":false,"comps":{},"bp":{"nodes":[{"id":"n1m3m4xi","kind":"Overlap","x":40,"y":60,"p":{"tag":"player"},"next":"n3ee9diq","nextFalse":null},{"id":"n3ee9diq","kind":"AddVar","x":290,"y":60,"p":{"var":"score","amount":10},"next":"n82t3k28","nextFalse":null},{"id":"n82t3k28","kind":"PlaySound","x":540,"y":60,"p":{"sound":"ayx8ujrv"},"next":"nbynhb65","nextFalse":null},{"id":"nbynhb65","kind":"Particles","x":790,"y":60,"p":{"color":10,"count":10},"next":"n85kqf0c","nextFalse":null},{"id":"n85kqf0c","kind":"Destroy","x":1040,"y":60,"p":{"target":"self"},"next":null,"nextFalse":null}]}},{"id":"ojy7r52c","name":"Coin","sprite":"snrifh28","x":272,"y":88,"tags":"pickup","template":false,"comps":{},"bp":{"nodes":[{"id":"nbxq670x","kind":"Overlap","x":40,"y":60,"p":{"tag":"player"},"next":"n3xbr5z5","nextFalse":null},{"id":"n3xbr5z5","kind":"AddVar","x":290,"y":60,"p":{"var":"score","amount":10},"next":"nit7xmka","nextFalse":null},{"id":"nit7xmka","kind":"PlaySound","x":540,"y":60,"p":{"sound":"ayx8ujrv"},"next":"ni3ljccn","nextFalse":null},{"id":"ni3ljccn","kind":"Particles","x":790,"y":60,"p":{"color":10,"count":10},"next":"neoczi2a","nextFalse":null},{"id":"neoczi2a","kind":"Destroy","x":1040,"y":60,"p":{"target":"self"},"next":null,"nextFalse":null}]}},{"id":"o31r9tfl","name":"Coin","sprite":"snrifh28","x":360,"y":64,"tags":"pickup","template":false,"comps":{},"bp":{"nodes":[{"id":"n021paxq","kind":"Overlap","x":40,"y":60,"p":{"tag":"player"},"next":"nx34r2br","nextFalse":null},{"id":"nx34r2br","kind":"AddVar","x":290,"y":60,"p":{"var":"score","amount":10},"next":"nh5fc968","nextFalse":null},{"id":"nh5fc968","kind":"PlaySound","x":540,"y":60,"p":{"sound":"ayx8ujrv"},"next":"nshsnuvl","nextFalse":null},{"id":"nshsnuvl","kind":"Particles","x":790,"y":60,"p":{"color":10,"count":10},"next":"nzuhfi2n","nextFalse":null},{"id":"nzuhfi2n","kind":"Destroy","x":1040,"y":60,"p":{"target":"self"},"next":null,"nextFalse":null}]}},{"id":"otzkx0qt","name":"Coin","sprite":"snrifh28","x":368,"y":64,"tags":"pickup","template":false,"comps":{},"bp":{"nodes":[{"id":"n83sno8w","kind":"Overlap","x":40,"y":60,"p":{"tag":"player"},"next":"n1uuykc6","nextFalse":null},{"id":"n1uuykc6","kind":"AddVar","x":290,"y":60,"p":{"var":"score","amount":10},"next":"n4gfr8lt","nextFalse":null},{"id":"n4gfr8lt","kind":"PlaySound","x":540,"y":60,"p":{"sound":"ayx8ujrv"},"next":"nwiq8yup","nextFalse":null},{"id":"nwiq8yup","kind":"Particles","x":790,"y":60,"p":{"color":10,"count":10},"next":"ncsjsgt2","nextFalse":null},{"id":"ncsjsgt2","kind":"Destroy","x":1040,"y":60,"p":{"target":"self"},"next":null,"nextFalse":null}]}},{"id":"o7da17st","name":"Coin","sprite":"snrifh28","x":320,"y":96,"tags":"pickup","template":false,"comps":{},"bp":{"nodes":[{"id":"nxt4ph4n","kind":"Overlap","x":40,"y":60,"p":{"tag":"player"},"next":"nvjqnbgm","nextFalse":null},{"id":"nvjqnbgm","kind":"AddVar","x":290,"y":60,"p":{"var":"score","amount":10},"next":"nv7xs9xc","nextFalse":null},{"id":"nv7xs9xc","kind":"PlaySound","x":540,"y":60,"p":{"sound":"ayx8ujrv"},"next":"nuo944w1","nextFalse":null},{"id":"nuo944w1","kind":"Particles","x":790,"y":60,"p":{"color":10,"count":10},"next":"nu0l9u1d","nextFalse":null},{"id":"nu0l9u1d","kind":"Destroy","x":1040,"y":60,"p":{"target":"self"},"next":null,"nextFalse":null}]}},{"id":"ofv8fpql","name":"Coin","sprite":"snrifh28","x":328,"y":96,"tags":"pickup","template":false,"comps":{},"bp":{"nodes":[{"id":"ntbut03l","kind":"Overlap","x":40,"y":60,"p":{"tag":"player"},"next":"numm5bq4","nextFalse":null},{"id":"numm5bq4","kind":"AddVar","x":290,"y":60,"p":{"var":"score","amount":10},"next":"n6af5m3b","nextFalse":null},{"id":"n6af5m3b","kind":"PlaySound","x":540,"y":60,"p":{"sound":"ayx8ujrv"},"next":"nauivpl1","nextFalse":null},{"id":"nauivpl1","kind":"Particles","x":790,"y":60,"p":{"color":10,"count":10},"next":"nd4z0igd","nextFalse":null},{"id":"nd4z0igd","kind":"Destroy","x":1040,"y":60,"p":{"target":"self"},"next":null,"nextFalse":null}]}},{"id":"ocjcwjx1","name":"Slime","sprite":"savmattd","x":120,"y":120,"tags":"enemy","template":false,"comps":{"physics":{"gravity":0.22},"patrol":{"speed":0.4,"edges":true}},"bp":{"nodes":[{"id":"nwwekxjm","kind":"Overlap","x":40,"y":40,"p":{"tag":"player"},"next":"n3h7wy52","nextFalse":null},{"id":"n3h7wy52","kind":"IfOtherAbove","x":290,"y":40,"p":{},"next":"nzasyp20","nextFalse":"n96sm2aq"},{"id":"nzasyp20","kind":"AddVar","x":540,"y":40,"p":{"var":"score","amount":50},"next":"n6s8jgmp","nextFalse":null},{"id":"n6s8jgmp","kind":"PlaySound","x":790,"y":40,"p":{"sound":"afiu3bmu"},"next":"n2zy17i5","nextFalse":null},{"id":"n2zy17i5","kind":"Particles","x":1040,"y":40,"p":{"color":6,"count":14},"next":"np3n4mdq","nextFalse":null},{"id":"np3n4mdq","kind":"SetVelocity","x":1290,"y":40,"p":{"target":"other","vx":"","vy":-3.2},"next":"nq30gi90","nextFalse":null},{"id":"nq30gi90","kind":"Destroy","x":1540,"y":40,"p":{"target":"self"},"next":null,"nextFalse":null},{"id":"n96sm2aq","kind":"PlaySound","x":540,"y":300,"p":{"sound":"ae344q0o"},"next":"net7zibi","nextFalse":null},{"id":"net7zibi","kind":"CameraShake","x":790,"y":300,"p":{"strength":3,"frames":20},"next":"nkhe7tr8","nextFalse":null},{"id":"nkhe7tr8","kind":"AddVar","x":1040,"y":300,"p":{"var":"lives","amount":-1},"next":"nhxqkl7j","nextFalse":null},{"id":"nhxqkl7j","kind":"Branch","x":1290,"y":300,"p":{"var":"lives","op":">","value":0},"next":"n6bb004r","nextFalse":"n78of820"},{"id":"n6bb004r","kind":"LoadLevel","x":1540,"y":300,"p":{"level":"__restart","endText":"YOU WIN!\\nSCORE {score}"},"next":null,"nextFalse":null},{"id":"n78of820","kind":"ShowMessage","x":1540,"y":490,"p":{"text":"GAME OVER","seconds":2},"next":"nqnhbi0b","nextFalse":null},{"id":"nqnhbi0b","kind":"Delay","x":1790,"y":490,"p":{"seconds":2},"next":"nmxtq9tt","nextFalse":null},{"id":"nmxtq9tt","kind":"SetVar","x":2040,"y":490,"p":{"var":"lives","value":3},"next":"nvd0wdyx","nextFalse":null},{"id":"nvd0wdyx","kind":"SetVar","x":2290,"y":490,"p":{"var":"score","value":0},"next":"nsig5ilf","nextFalse":null},{"id":"nsig5ilf","kind":"LoadLevel","x":2540,"y":490,"p":{"level":"__first","endText":"YOU WIN!\\nSCORE {score}"},"next":null,"nextFalse":null},{"id":"n9xyiaah","kind":"Overlap","x":40,"y":720,"p":{"tag":"fireball"},"next":"nby3dc9n","nextFalse":null},{"id":"nby3dc9n","kind":"PlaySound","x":290,"y":720,"p":{"sound":"ap4wrvac"},"next":"n9fz6xys","nextFalse":null},{"id":"n9fz6xys","kind":"Particles","x":540,"y":720,"p":{"color":13,"count":16},"next":"n8579maq","nextFalse":null},{"id":"n8579maq","kind":"AddVar","x":790,"y":720,"p":{"var":"score","amount":50},"next":"n58hsbvt","nextFalse":null},{"id":"n58hsbvt","kind":"Destroy","x":1040,"y":720,"p":{"target":"other"},"next":"nh985t78","nextFalse":null},{"id":"nh985t78","kind":"Destroy","x":1290,"y":720,"p":{"target":"self"},"next":null,"nextFalse":null}]}},{"id":"obb41smk","name":"Slime","sprite":"savmattd","x":240,"y":120,"tags":"enemy","template":false,"comps":{"physics":{"gravity":0.22},"patrol":{"speed":0.4,"edges":true}},"bp":{"nodes":[{"id":"n3j0nyws","kind":"Overlap","x":40,"y":40,"p":{"tag":"player"},"next":"nkmvsz5g","nextFalse":null},{"id":"nkmvsz5g","kind":"IfOtherAbove","x":290,"y":40,"p":{},"next":"nznqk4fk","nextFalse":"nci4nrp4"},{"id":"nznqk4fk","kind":"AddVar","x":540,"y":40,"p":{"var":"score","amount":50},"next":"ntgo03t9","nextFalse":null},{"id":"ntgo03t9","kind":"PlaySound","x":790,"y":40,"p":{"sound":"afiu3bmu"},"next":"n3b3ib2p","nextFalse":null},{"id":"n3b3ib2p","kind":"Particles","x":1040,"y":40,"p":{"color":6,"count":14},"next":"nrzdbo48","nextFalse":null},{"id":"nrzdbo48","kind":"SetVelocity","x":1290,"y":40,"p":{"target":"other","vx":"","vy":-3.2},"next":"n16zkh06","nextFalse":null},{"id":"n16zkh06","kind":"Destroy","x":1540,"y":40,"p":{"target":"self"},"next":null,"nextFalse":null},{"id":"nci4nrp4","kind":"PlaySound","x":540,"y":300,"p":{"sound":"ae344q0o"},"next":"nmcj0s41","nextFalse":null},{"id":"nmcj0s41","kind":"CameraShake","x":790,"y":300,"p":{"strength":3,"frames":20},"next":"n9561z5w","nextFalse":null},{"id":"n9561z5w","kind":"AddVar","x":1040,"y":300,"p":{"var":"lives","amount":-1},"next":"npr0fvgi","nextFalse":null},{"id":"npr0fvgi","kind":"Branch","x":1290,"y":300,"p":{"var":"lives","op":">","value":0},"next":"nub93a0w","nextFalse":"n79ketaf"},{"id":"nub93a0w","kind":"LoadLevel","x":1540,"y":300,"p":{"level":"__restart","endText":"YOU WIN!\\nSCORE {score}"},"next":null,"nextFalse":null},{"id":"n79ketaf","kind":"ShowMessage","x":1540,"y":490,"p":{"text":"GAME OVER","seconds":2},"next":"n4pz8xwj","nextFalse":null},{"id":"n4pz8xwj","kind":"Delay","x":1790,"y":490,"p":{"seconds":2},"next":"narkmxy3","nextFalse":null},{"id":"narkmxy3","kind":"SetVar","x":2040,"y":490,"p":{"var":"lives","value":3},"next":"nb7c0uj4","nextFalse":null},{"id":"nb7c0uj4","kind":"SetVar","x":2290,"y":490,"p":{"var":"score","value":0},"next":"n2a481fx","nextFalse":null},{"id":"n2a481fx","kind":"LoadLevel","x":2540,"y":490,"p":{"level":"__first","endText":"YOU WIN!\\nSCORE {score}"},"next":null,"nextFalse":null},{"id":"ngi4xmxd","kind":"Overlap","x":40,"y":720,"p":{"tag":"fireball"},"next":"nftqzbjv","nextFalse":null},{"id":"nftqzbjv","kind":"PlaySound","x":290,"y":720,"p":{"sound":"ap4wrvac"},"next":"nvl14z0p","nextFalse":null},{"id":"nvl14z0p","kind":"Particles","x":540,"y":720,"p":{"color":13,"count":16},"next":"nxjk49f7","nextFalse":null},{"id":"nxjk49f7","kind":"AddVar","x":790,"y":720,"p":{"var":"score","amount":50},"next":"nieonvhj","nextFalse":null},{"id":"nieonvhj","kind":"Destroy","x":1040,"y":720,"p":{"target":"other"},"next":"nw6m9y0p","nextFalse":null},{"id":"nw6m9y0p","kind":"Destroy","x":1290,"y":720,"p":{"target":"self"},"next":null,"nextFalse":null}]}},{"id":"opiym5pl","name":"Slime","sprite":"savmattd","x":296,"y":120,"tags":"enemy","template":false,"comps":{"physics":{"gravity":0.22},"patrol":{"speed":0.4,"edges":true}},"bp":{"nodes":[{"id":"n9ewzfhx","kind":"Overlap","x":40,"y":40,"p":{"tag":"player"},"next":"nf2nwpm0","nextFalse":null},{"id":"nf2nwpm0","kind":"IfOtherAbove","x":290,"y":40,"p":{},"next":"nacvxiac","nextFalse":"nglmxojh"},{"id":"nacvxiac","kind":"AddVar","x":540,"y":40,"p":{"var":"score","amount":50},"next":"n2sah38o","nextFalse":null},{"id":"n2sah38o","kind":"PlaySound","x":790,"y":40,"p":{"sound":"afiu3bmu"},"next":"njp3qpzd","nextFalse":null},{"id":"njp3qpzd","kind":"Particles","x":1040,"y":40,"p":{"color":6,"count":14},"next":"n1hsu1uo","nextFalse":null},{"id":"n1hsu1uo","kind":"SetVelocity","x":1290,"y":40,"p":{"target":"other","vx":"","vy":-3.2},"next":"nig966f1","nextFalse":null},{"id":"nig966f1","kind":"Destroy","x":1540,"y":40,"p":{"target":"self"},"next":null,"nextFalse":null},{"id":"nglmxojh","kind":"PlaySound","x":540,"y":300,"p":{"sound":"ae344q0o"},"next":"nuag72je","nextFalse":null},{"id":"nuag72je","kind":"CameraShake","x":790,"y":300,"p":{"strength":3,"frames":20},"next":"nvxzk3n9","nextFalse":null},{"id":"nvxzk3n9","kind":"AddVar","x":1040,"y":300,"p":{"var":"lives","amount":-1},"next":"n7g30615","nextFalse":null},{"id":"n7g30615","kind":"Branch","x":1290,"y":300,"p":{"var":"lives","op":">","value":0},"next":"nzc0uql4","nextFalse":"n829129k"},{"id":"nzc0uql4","kind":"LoadLevel","x":1540,"y":300,"p":{"level":"__restart","endText":"YOU WIN!\\nSCORE {score}"},"next":null,"nextFalse":null},{"id":"n829129k","kind":"ShowMessage","x":1540,"y":490,"p":{"text":"GAME OVER","seconds":2},"next":"nakvc7zv","nextFalse":null},{"id":"nakvc7zv","kind":"Delay","x":1790,"y":490,"p":{"seconds":2},"next":"nyz756p3","nextFalse":null},{"id":"nyz756p3","kind":"SetVar","x":2040,"y":490,"p":{"var":"lives","value":3},"next":"n7ocpi09","nextFalse":null},{"id":"n7ocpi09","kind":"SetVar","x":2290,"y":490,"p":{"var":"score","value":0},"next":"ncz2im4t","nextFalse":null},{"id":"ncz2im4t","kind":"LoadLevel","x":2540,"y":490,"p":{"level":"__first","endText":"YOU WIN!\\nSCORE {score}"},"next":null,"nextFalse":null},{"id":"np2lwjsy","kind":"Overlap","x":40,"y":720,"p":{"tag":"fireball"},"next":"nwup6juj","nextFalse":null},{"id":"nwup6juj","kind":"PlaySound","x":290,"y":720,"p":{"sound":"ap4wrvac"},"next":"ndf9lcdm","nextFalse":null},{"id":"ndf9lcdm","kind":"Particles","x":540,"y":720,"p":{"color":13,"count":16},"next":"n4udjaes","nextFalse":null},{"id":"n4udjaes","kind":"AddVar","x":790,"y":720,"p":{"var":"score","amount":50},"next":"nbunrz46","nextFalse":null},{"id":"nbunrz46","kind":"Destroy","x":1040,"y":720,"p":{"target":"other"},"next":"n8cj9e8j","nextFalse":null},{"id":"n8cj9e8j","kind":"Destroy","x":1290,"y":720,"p":{"target":"self"},"next":null,"nextFalse":null}]}},{"id":"oyciuq1g","name":"Slime","sprite":"savmattd","x":392,"y":120,"tags":"enemy","template":false,"comps":{"physics":{"gravity":0.22},"patrol":{"speed":0.4,"edges":true}},"bp":{"nodes":[{"id":"ny9gg3ge","kind":"Overlap","x":40,"y":40,"p":{"tag":"player"},"next":"nwm9x7tt","nextFalse":null},{"id":"nwm9x7tt","kind":"IfOtherAbove","x":290,"y":40,"p":{},"next":"nd928bq7","nextFalse":"n7ouenij"},{"id":"nd928bq7","kind":"AddVar","x":540,"y":40,"p":{"var":"score","amount":50},"next":"nqx7ldjr","nextFalse":null},{"id":"nqx7ldjr","kind":"PlaySound","x":790,"y":40,"p":{"sound":"afiu3bmu"},"next":"nfgl7lfo","nextFalse":null},{"id":"nfgl7lfo","kind":"Particles","x":1040,"y":40,"p":{"color":6,"count":14},"next":"ntjuoydd","nextFalse":null},{"id":"ntjuoydd","kind":"SetVelocity","x":1290,"y":40,"p":{"target":"other","vx":"","vy":-3.2},"next":"ng6c7saz","nextFalse":null},{"id":"ng6c7saz","kind":"Destroy","x":1540,"y":40,"p":{"target":"self"},"next":null,"nextFalse":null},{"id":"n7ouenij","kind":"PlaySound","x":540,"y":300,"p":{"sound":"ae344q0o"},"next":"ngjyx59u","nextFalse":null},{"id":"ngjyx59u","kind":"CameraShake","x":790,"y":300,"p":{"strength":3,"frames":20},"next":"nc96yn5y","nextFalse":null},{"id":"nc96yn5y","kind":"AddVar","x":1040,"y":300,"p":{"var":"lives","amount":-1},"next":"nvqhhiew","nextFalse":null},{"id":"nvqhhiew","kind":"Branch","x":1290,"y":300,"p":{"var":"lives","op":">","value":0},"next":"nm7cr227","nextFalse":"n7o0ag6h"},{"id":"nm7cr227","kind":"LoadLevel","x":1540,"y":300,"p":{"level":"__restart","endText":"YOU WIN!\\nSCORE {score}"},"next":null,"nextFalse":null},{"id":"n7o0ag6h","kind":"ShowMessage","x":1540,"y":490,"p":{"text":"GAME OVER","seconds":2},"next":"nk97vrb0","nextFalse":null},{"id":"nk97vrb0","kind":"Delay","x":1790,"y":490,"p":{"seconds":2},"next":"nchb6711","nextFalse":null},{"id":"nchb6711","kind":"SetVar","x":2040,"y":490,"p":{"var":"lives","value":3},"next":"n7lb9qoj","nextFalse":null},{"id":"n7lb9qoj","kind":"SetVar","x":2290,"y":490,"p":{"var":"score","value":0},"next":"nhiogljz","nextFalse":null},{"id":"nhiogljz","kind":"LoadLevel","x":2540,"y":490,"p":{"level":"__first","endText":"YOU WIN!\\nSCORE {score}"},"next":null,"nextFalse":null},{"id":"n4cgh1ma","kind":"Overlap","x":40,"y":720,"p":{"tag":"fireball"},"next":"nai23y9z","nextFalse":null},{"id":"nai23y9z","kind":"PlaySound","x":290,"y":720,"p":{"sound":"ap4wrvac"},"next":"nwdqcu96","nextFalse":null},{"id":"nwdqcu96","kind":"Particles","x":540,"y":720,"p":{"color":13,"count":16},"next":"n9acn1ay","nextFalse":null},{"id":"n9acn1ay","kind":"AddVar","x":790,"y":720,"p":{"var":"score","amount":50},"next":"nmtsvij4","nextFalse":null},{"id":"nmtsvij4","kind":"Destroy","x":1040,"y":720,"p":{"target":"other"},"next":"nwkgiywh","nextFalse":null},{"id":"nwkgiywh","kind":"Destroy","x":1290,"y":720,"p":{"target":"self"},"next":null,"nextFalse":null}]}},{"id":"oz049zrl","name":"Goal Flag","sprite":"sdl39xe8","x":488,"y":120,"tags":"goal","template":false,"comps":{},"bp":{"nodes":[{"id":"ndiigbr1","kind":"Overlap","x":40,"y":60,"p":{"tag":"player"},"next":"nm3kvaju","nextFalse":null},{"id":"nm3kvaju","kind":"PlaySound","x":290,"y":60,"p":{"sound":"au2gyfnb"},"next":"nm9cmgey","nextFalse":null},{"id":"nm9cmgey","kind":"Particles","x":540,"y":60,"p":{"color":12,"count":20},"next":"ne6mucvb","nextFalse":null},{"id":"ne6mucvb","kind":"ShowMessage","x":790,"y":60,"p":{"text":"LEVEL CLEAR!","seconds":2},"next":"n8few1jk","nextFalse":null},{"id":"n8few1jk","kind":"Delay","x":1040,"y":60,"p":{"seconds":2},"next":"nml5rq9p","nextFalse":null},{"id":"nml5rq9p","kind":"LoadLevel","x":1290,"y":60,"p":{"level":"__next","endText":"YOU WIN!\\nSCORE {score}"},"next":null,"nextFalse":null}]}}]},{"id":"lv3nxit6","name":"Sky Bridges","w":48,"h":18,"bg":2,"tiles":[null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,"svx8t320","svx8t320",null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,"svx8t320","svx8t320",null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,"svx8t320","svx8t320",null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,"sbno9k8u","sbno9k8u","sbno9k8u","sbno9k8u",null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,"sbno9k8u","sbno9k8u","sbno9k8u",null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,"sbno9k8u","sbno9k8u","sbno9k8u",null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,"sbno9k8u","sbno9k8u","sbno9k8u","sbno9k8u",null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,"sbno9k8u","sbno9k8u","sbno9k8u",null,null,null,null,null,null,null,"sbno9k8u","sbno9k8u","sbno9k8u","sbno9k8u",null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,"sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871",null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,"sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","sfzf9871","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u",null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,"s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u","s5n94w9u"],"actors":[{"id":"o5c0r4nd","name":"Player","sprite":"smub58yb","x":16,"y":120,"tags":"player","template":false,"comps":{"physics":{"gravity":0.22},"platformer":{"speed":1.2,"jump":3.6,"jumpSound":"a9587pfl"}},"bp":{"nodes":[{"id":"nykfwj4k","kind":"FellOutOfWorld","x":40,"y":40,"p":{},"next":"nq7mled3","nextFalse":null},{"id":"nq7mled3","kind":"PlaySound","x":290,"y":40,"p":{"sound":"ae344q0o"},"next":"n8b8v05m","nextFalse":null},{"id":"n8b8v05m","kind":"CameraShake","x":540,"y":40,"p":{"strength":3,"frames":20},"next":"nm047pkr","nextFalse":null},{"id":"nm047pkr","kind":"AddVar","x":790,"y":40,"p":{"var":"lives","amount":-1},"next":"nfr8bd0f","nextFalse":null},{"id":"nfr8bd0f","kind":"Branch","x":1040,"y":40,"p":{"var":"lives","op":">","value":0},"next":"nknwlr5u","nextFalse":"n0wfcc6p"},{"id":"nknwlr5u","kind":"LoadLevel","x":1290,"y":40,"p":{"level":"__restart","endText":"YOU WIN!\\nSCORE {score}"},"next":null,"nextFalse":null},{"id":"n0wfcc6p","kind":"ShowMessage","x":1290,"y":230,"p":{"text":"GAME OVER","seconds":2},"next":"nnrwjtz7","nextFalse":null},{"id":"nnrwjtz7","kind":"Delay","x":1540,"y":230,"p":{"seconds":2},"next":"nfmpy6dr","nextFalse":null},{"id":"nfmpy6dr","kind":"SetVar","x":1790,"y":230,"p":{"var":"lives","value":3},"next":"n079sot1","nextFalse":null},{"id":"n079sot1","kind":"SetVar","x":2040,"y":230,"p":{"var":"score","value":0},"next":"neljbcd5","nextFalse":null},{"id":"neljbcd5","kind":"LoadLevel","x":2290,"y":230,"p":{"level":"__first","endText":"YOU WIN!\\nSCORE {score}"},"next":null,"nextFalse":null},{"id":"nshs3olr","kind":"BeginPlay","x":40,"y":470,"p":{},"next":"n5rjm9fh","nextFalse":null},{"id":"n5rjm9fh","kind":"Print","x":290,"y":470,"p":{"text":"BEGIN PLAY! SCORE {score}"},"next":null,"nextFalse":null},{"id":"noponblx","kind":"KeyPressed","x":40,"y":620,"p":{"key":"KeyX"},"next":"nyofu236","nextFalse":null},{"id":"nyofu236","kind":"Spawn","x":290,"y":620,"p":{"actor":"Fireball","dx":6,"dy":0},"next":"n02xyxny","nextFalse":null},{"id":"n02xyxny","kind":"PlaySound","x":540,"y":620,"p":{"sound":"a7ccs1j1"},"next":null,"nextFalse":null}]}},{"id":"ovmq6c87","name":"Fireball","sprite":"sm2vy1kg","x":0,"y":8,"tags":"fireball","template":true,"comps":{"patrol":{"speed":2.4,"edges":false},"physics":{"gravity":0.12}},"bp":{"nodes":[{"id":"n27u7g72","kind":"BeginPlay","x":40,"y":60,"p":{},"next":"nyas294s","nextFalse":null},{"id":"n1wvp0d2","kind":"Timer","x":40,"y":220,"p":{"seconds":1.2,"loop":false},"next":"nmr4wn5u","nextFalse":null},{"id":"nmr4wn5u","kind":"Destroy","x":290,"y":220,"p":{"target":"self"},"next":null,"nextFalse":null},{"id":"nyas294s","kind":"SetVelocity","x":290,"y":60,"p":{"target":"self","vx":"","vy":-1},"next":null,"nextFalse":null}]}},{"id":"oywph84t","name":"Coin","sprite":"snrifh28","x":72,"y":104,"tags":"pickup","template":false,"comps":{},"bp":{"nodes":[{"id":"nh6byidv","kind":"Overlap","x":40,"y":60,"p":{"tag":"player"},"next":"ngptmuoh","nextFalse":null},{"id":"ngptmuoh","kind":"AddVar","x":290,"y":60,"p":{"var":"score","amount":10},"next":"nm3q4ayg","nextFalse":null},{"id":"nm3q4ayg","kind":"PlaySound","x":540,"y":60,"p":{"sound":"ayx8ujrv"},"next":"nwfezsnl","nextFalse":null},{"id":"nwfezsnl","kind":"Particles","x":790,"y":60,"p":{"color":10,"count":10},"next":"n4bax0od","nextFalse":null},{"id":"n4bax0od","kind":"Destroy","x":1040,"y":60,"p":{"target":"self"},"next":null,"nextFalse":null}]}},{"id":"ofbeka3o","name":"Coin","sprite":"snrifh28","x":112,"y":88,"tags":"pickup","template":false,"comps":{},"bp":{"nodes":[{"id":"nvjoc506","kind":"Overlap","x":40,"y":60,"p":{"tag":"player"},"next":"n3qoy12d","nextFalse":null},{"id":"n3qoy12d","kind":"AddVar","x":290,"y":60,"p":{"var":"score","amount":10},"next":"n19hrs9n","nextFalse":null},{"id":"n19hrs9n","kind":"PlaySound","x":540,"y":60,"p":{"sound":"ayx8ujrv"},"next":"nlg8iqfg","nextFalse":null},{"id":"nlg8iqfg","kind":"Particles","x":790,"y":60,"p":{"color":10,"count":10},"next":"nfzhax74","nextFalse":null},{"id":"nfzhax74","kind":"Destroy","x":1040,"y":60,"p":{"target":"self"},"next":null,"nextFalse":null}]}},{"id":"oxfhaimf","name":"Coin","sprite":"snrifh28","x":152,"y":104,"tags":"pickup","template":false,"comps":{},"bp":{"nodes":[{"id":"nmtbeye7","kind":"Overlap","x":40,"y":60,"p":{"tag":"player"},"next":"n2n9lxzu","nextFalse":null},{"id":"n2n9lxzu","kind":"AddVar","x":290,"y":60,"p":{"var":"score","amount":10},"next":"niafu3rt","nextFalse":null},{"id":"niafu3rt","kind":"PlaySound","x":540,"y":60,"p":{"sound":"ayx8ujrv"},"next":"nzhj6xwc","nextFalse":null},{"id":"nzhj6xwc","kind":"Particles","x":790,"y":60,"p":{"color":10,"count":10},"next":"n80wx2bn","nextFalse":null},{"id":"n80wx2bn","kind":"Destroy","x":1040,"y":60,"p":{"target":"self"},"next":null,"nextFalse":null}]}},{"id":"ohuh9f7e","name":"Coin","sprite":"snrifh28","x":160,"y":104,"tags":"pickup","template":false,"comps":{},"bp":{"nodes":[{"id":"nyfzddeo","kind":"Overlap","x":40,"y":60,"p":{"tag":"player"},"next":"nb2mptqi","nextFalse":null},{"id":"nb2mptqi","kind":"AddVar","x":290,"y":60,"p":{"var":"score","amount":10},"next":"nkugtwsp","nextFalse":null},{"id":"nkugtwsp","kind":"PlaySound","x":540,"y":60,"p":{"sound":"ayx8ujrv"},"next":"nfsot8h1","nextFalse":null},{"id":"nfsot8h1","kind":"Particles","x":790,"y":60,"p":{"color":10,"count":10},"next":"n2t3618z","nextFalse":null},{"id":"n2t3618z","kind":"Destroy","x":1040,"y":60,"p":{"target":"self"},"next":null,"nextFalse":null}]}},{"id":"onz2ys01","name":"Coin","sprite":"snrifh28","x":200,"y":80,"tags":"pickup","template":false,"comps":{},"bp":{"nodes":[{"id":"n105krue","kind":"Overlap","x":40,"y":60,"p":{"tag":"player"},"next":"nzp7jclu","nextFalse":null},{"id":"nzp7jclu","kind":"AddVar","x":290,"y":60,"p":{"var":"score","amount":10},"next":"nc8fkorj","nextFalse":null},{"id":"nc8fkorj","kind":"PlaySound","x":540,"y":60,"p":{"sound":"ayx8ujrv"},"next":"nzd7u71d","nextFalse":null},{"id":"nzd7u71d","kind":"Particles","x":790,"y":60,"p":{"color":10,"count":10},"next":"n4rg1ehr","nextFalse":null},{"id":"n4rg1ehr","kind":"Destroy","x":1040,"y":60,"p":{"target":"self"},"next":null,"nextFalse":null}]}},{"id":"ob7k7fzq","name":"Coin","sprite":"snrifh28","x":240,"y":96,"tags":"pickup","template":false,"comps":{},"bp":{"nodes":[{"id":"niey2gh9","kind":"Overlap","x":40,"y":60,"p":{"tag":"player"},"next":"nxkouxia","nextFalse":null},{"id":"nxkouxia","kind":"AddVar","x":290,"y":60,"p":{"var":"score","amount":10},"next":"nes8cuos","nextFalse":null},{"id":"nes8cuos","kind":"PlaySound","x":540,"y":60,"p":{"sound":"ayx8ujrv"},"next":"nputjjcw","nextFalse":null},{"id":"nputjjcw","kind":"Particles","x":790,"y":60,"p":{"color":10,"count":10},"next":"nfvyleu5","nextFalse":null},{"id":"nfvyleu5","kind":"Destroy","x":1040,"y":60,"p":{"target":"self"},"next":null,"nextFalse":null}]}},{"id":"onh53i5g","name":"Coin","sprite":"snrifh28","x":248,"y":96,"tags":"pickup","template":false,"comps":{},"bp":{"nodes":[{"id":"nkkgxqen","kind":"Overlap","x":40,"y":60,"p":{"tag":"player"},"next":"nmaxs1fd","nextFalse":null},{"id":"nmaxs1fd","kind":"AddVar","x":290,"y":60,"p":{"var":"score","amount":10},"next":"ng0difmu","nextFalse":null},{"id":"ng0difmu","kind":"PlaySound","x":540,"y":60,"p":{"sound":"ayx8ujrv"},"next":"nn29ixdv","nextFalse":null},{"id":"nn29ixdv","kind":"Particles","x":790,"y":60,"p":{"color":10,"count":10},"next":"ntrc1hkl","nextFalse":null},{"id":"ntrc1hkl","kind":"Destroy","x":1040,"y":60,"p":{"target":"self"},"next":null,"nextFalse":null}]}},{"id":"ousvwlcz","name":"Coin","sprite":"snrifh28","x":288,"y":72,"tags":"pickup","template":false,"comps":{},"bp":{"nodes":[{"id":"nbef118h","kind":"Overlap","x":40,"y":60,"p":{"tag":"player"},"next":"nuj2glm5","nextFalse":null},{"id":"nuj2glm5","kind":"AddVar","x":290,"y":60,"p":{"var":"score","amount":10},"next":"nkt1ifgi","nextFalse":null},{"id":"nkt1ifgi","kind":"PlaySound","x":540,"y":60,"p":{"sound":"ayx8ujrv"},"next":"n1sedvwb","nextFalse":null},{"id":"n1sedvwb","kind":"Particles","x":790,"y":60,"p":{"color":10,"count":10},"next":"n5em9nxk","nextFalse":null},{"id":"n5em9nxk","kind":"Destroy","x":1040,"y":60,"p":{"target":"self"},"next":null,"nextFalse":null}]}},{"id":"odksyh9x","name":"Coin","sprite":"snrifh28","x":296,"y":72,"tags":"pickup","template":false,"comps":{},"bp":{"nodes":[{"id":"nh22fosn","kind":"Overlap","x":40,"y":60,"p":{"tag":"player"},"next":"n3my6xo1","nextFalse":null},{"id":"n3my6xo1","kind":"AddVar","x":290,"y":60,"p":{"var":"score","amount":10},"next":"n75fetsc","nextFalse":null},{"id":"n75fetsc","kind":"PlaySound","x":540,"y":60,"p":{"sound":"ayx8ujrv"},"next":"npn97x5z","nextFalse":null},{"id":"npn97x5z","kind":"Particles","x":790,"y":60,"p":{"color":10,"count":10},"next":"n7940i9u","nextFalse":null},{"id":"n7940i9u","kind":"Destroy","x":1040,"y":60,"p":{"target":"self"},"next":null,"nextFalse":null}]}},{"id":"o05vgfd4","name":"Slime","sprite":"savmattd","x":152,"y":104,"tags":"enemy","template":false,"comps":{"physics":{"gravity":0.22},"patrol":{"speed":0.4,"edges":true}},"bp":{"nodes":[{"id":"n0amyfw0","kind":"Overlap","x":40,"y":40,"p":{"tag":"player"},"next":"nny7nv49","nextFalse":null},{"id":"nny7nv49","kind":"IfOtherAbove","x":290,"y":40,"p":{},"next":"n6gexqip","nextFalse":"ndbfmyjk"},{"id":"n6gexqip","kind":"AddVar","x":540,"y":40,"p":{"var":"score","amount":50},"next":"nsodmquw","nextFalse":null},{"id":"nsodmquw","kind":"PlaySound","x":790,"y":40,"p":{"sound":"afiu3bmu"},"next":"n1fzrob7","nextFalse":null},{"id":"n1fzrob7","kind":"Particles","x":1040,"y":40,"p":{"color":6,"count":14},"next":"nudpunth","nextFalse":null},{"id":"nudpunth","kind":"SetVelocity","x":1290,"y":40,"p":{"target":"other","vx":"","vy":-3.2},"next":"nxg5pnw0","nextFalse":null},{"id":"nxg5pnw0","kind":"Destroy","x":1540,"y":40,"p":{"target":"self"},"next":null,"nextFalse":null},{"id":"ndbfmyjk","kind":"PlaySound","x":540,"y":300,"p":{"sound":"ae344q0o"},"next":"nmbn5ylz","nextFalse":null},{"id":"nmbn5ylz","kind":"CameraShake","x":790,"y":300,"p":{"strength":3,"frames":20},"next":"nysulipn","nextFalse":null},{"id":"nysulipn","kind":"AddVar","x":1040,"y":300,"p":{"var":"lives","amount":-1},"next":"n5ckc0dp","nextFalse":null},{"id":"n5ckc0dp","kind":"Branch","x":1290,"y":300,"p":{"var":"lives","op":">","value":0},"next":"n7rbogzo","nextFalse":"no2zg828"},{"id":"n7rbogzo","kind":"LoadLevel","x":1540,"y":300,"p":{"level":"__restart","endText":"YOU WIN!\\nSCORE {score}"},"next":null,"nextFalse":null},{"id":"no2zg828","kind":"ShowMessage","x":1540,"y":490,"p":{"text":"GAME OVER","seconds":2},"next":"nu06vio8","nextFalse":null},{"id":"nu06vio8","kind":"Delay","x":1790,"y":490,"p":{"seconds":2},"next":"nswwy2ig","nextFalse":null},{"id":"nswwy2ig","kind":"SetVar","x":2040,"y":490,"p":{"var":"lives","value":3},"next":"nqxhbqmu","nextFalse":null},{"id":"nqxhbqmu","kind":"SetVar","x":2290,"y":490,"p":{"var":"score","value":0},"next":"nrswrrcg","nextFalse":null},{"id":"nrswrrcg","kind":"LoadLevel","x":2540,"y":490,"p":{"level":"__first","endText":"YOU WIN!\\nSCORE {score}"},"next":null,"nextFalse":null},{"id":"ndqz6g71","kind":"Overlap","x":40,"y":720,"p":{"tag":"fireball"},"next":"n4bzyv6y","nextFalse":null},{"id":"n4bzyv6y","kind":"PlaySound","x":290,"y":720,"p":{"sound":"ap4wrvac"},"next":"ndir6skb","nextFalse":null},{"id":"ndir6skb","kind":"Particles","x":540,"y":720,"p":{"color":13,"count":16},"next":"nbet8gbq","nextFalse":null},{"id":"nbet8gbq","kind":"AddVar","x":790,"y":720,"p":{"var":"score","amount":50},"next":"n9d0objl","nextFalse":null},{"id":"n9d0objl","kind":"Destroy","x":1040,"y":720,"p":{"target":"other"},"next":"npsjn9sb","nextFalse":null},{"id":"npsjn9sb","kind":"Destroy","x":1290,"y":720,"p":{"target":"self"},"next":null,"nextFalse":null}]}},{"id":"on561dr9","name":"Slime","sprite":"savmattd","x":240,"y":96,"tags":"enemy","template":false,"comps":{"physics":{"gravity":0.22},"patrol":{"speed":0.4,"edges":true}},"bp":{"nodes":[{"id":"nbut6ec1","kind":"Overlap","x":40,"y":40,"p":{"tag":"player"},"next":"niyk198n","nextFalse":null},{"id":"niyk198n","kind":"IfOtherAbove","x":290,"y":40,"p":{},"next":"no9jweb4","nextFalse":"n11629e8"},{"id":"no9jweb4","kind":"AddVar","x":540,"y":40,"p":{"var":"score","amount":50},"next":"nvc33kl3","nextFalse":null},{"id":"nvc33kl3","kind":"PlaySound","x":790,"y":40,"p":{"sound":"afiu3bmu"},"next":"nfos9tmx","nextFalse":null},{"id":"nfos9tmx","kind":"Particles","x":1040,"y":40,"p":{"color":6,"count":14},"next":"n84gkocm","nextFalse":null},{"id":"n84gkocm","kind":"SetVelocity","x":1290,"y":40,"p":{"target":"other","vx":"","vy":-3.2},"next":"n3a3xs4n","nextFalse":null},{"id":"n3a3xs4n","kind":"Destroy","x":1540,"y":40,"p":{"target":"self"},"next":null,"nextFalse":null},{"id":"n11629e8","kind":"PlaySound","x":540,"y":300,"p":{"sound":"ae344q0o"},"next":"n902mvpz","nextFalse":null},{"id":"n902mvpz","kind":"CameraShake","x":790,"y":300,"p":{"strength":3,"frames":20},"next":"n2epk1tt","nextFalse":null},{"id":"n2epk1tt","kind":"AddVar","x":1040,"y":300,"p":{"var":"lives","amount":-1},"next":"nxhve74u","nextFalse":null},{"id":"nxhve74u","kind":"Branch","x":1290,"y":300,"p":{"var":"lives","op":">","value":0},"next":"nc75j1pn","nextFalse":"nrjpaoy5"},{"id":"nc75j1pn","kind":"LoadLevel","x":1540,"y":300,"p":{"level":"__restart","endText":"YOU WIN!\\nSCORE {score}"},"next":null,"nextFalse":null},{"id":"nrjpaoy5","kind":"ShowMessage","x":1540,"y":490,"p":{"text":"GAME OVER","seconds":2},"next":"nsv7orzb","nextFalse":null},{"id":"nsv7orzb","kind":"Delay","x":1790,"y":490,"p":{"seconds":2},"next":"nhrlrir4","nextFalse":null},{"id":"nhrlrir4","kind":"SetVar","x":2040,"y":490,"p":{"var":"lives","value":3},"next":"n1z1fxan","nextFalse":null},{"id":"n1z1fxan","kind":"SetVar","x":2290,"y":490,"p":{"var":"score","value":0},"next":"nm2x1a1o","nextFalse":null},{"id":"nm2x1a1o","kind":"LoadLevel","x":2540,"y":490,"p":{"level":"__first","endText":"YOU WIN!\\nSCORE {score}"},"next":null,"nextFalse":null},{"id":"n85ilsva","kind":"Overlap","x":40,"y":720,"p":{"tag":"fireball"},"next":"ns71mwcd","nextFalse":null},{"id":"ns71mwcd","kind":"PlaySound","x":290,"y":720,"p":{"sound":"ap4wrvac"},"next":"nr8ejc6q","nextFalse":null},{"id":"nr8ejc6q","kind":"Particles","x":540,"y":720,"p":{"color":13,"count":16},"next":"n2wt3lbo","nextFalse":null},{"id":"n2wt3lbo","kind":"AddVar","x":790,"y":720,"p":{"var":"score","amount":50},"next":"n373evm1","nextFalse":null},{"id":"n373evm1","kind":"Destroy","x":1040,"y":720,"p":{"target":"other"},"next":"n21eeij3","nextFalse":null},{"id":"n21eeij3","kind":"Destroy","x":1290,"y":720,"p":{"target":"self"},"next":null,"nextFalse":null}]}},{"id":"o0iw0hm4","name":"Slime","sprite":"savmattd","x":288,"y":72,"tags":"enemy","template":false,"comps":{"physics":{"gravity":0.22},"patrol":{"speed":0.4,"edges":true}},"bp":{"nodes":[{"id":"nouf6eli","kind":"Overlap","x":40,"y":40,"p":{"tag":"player"},"next":"nl42eoat","nextFalse":null},{"id":"nl42eoat","kind":"IfOtherAbove","x":290,"y":40,"p":{},"next":"nw5206ne","nextFalse":"n9rallgo"},{"id":"nw5206ne","kind":"AddVar","x":540,"y":40,"p":{"var":"score","amount":50},"next":"nlxf0wu6","nextFalse":null},{"id":"nlxf0wu6","kind":"PlaySound","x":790,"y":40,"p":{"sound":"afiu3bmu"},"next":"n9lvox6s","nextFalse":null},{"id":"n9lvox6s","kind":"Particles","x":1040,"y":40,"p":{"color":6,"count":14},"next":"nnyapg0p","nextFalse":null},{"id":"nnyapg0p","kind":"SetVelocity","x":1290,"y":40,"p":{"target":"other","vx":"","vy":-3.2},"next":"nxs40jc1","nextFalse":null},{"id":"nxs40jc1","kind":"Destroy","x":1540,"y":40,"p":{"target":"self"},"next":null,"nextFalse":null},{"id":"n9rallgo","kind":"PlaySound","x":540,"y":300,"p":{"sound":"ae344q0o"},"next":"nwc5howu","nextFalse":null},{"id":"nwc5howu","kind":"CameraShake","x":790,"y":300,"p":{"strength":3,"frames":20},"next":"n3v3y5ty","nextFalse":null},{"id":"n3v3y5ty","kind":"AddVar","x":1040,"y":300,"p":{"var":"lives","amount":-1},"next":"n3vcm4jg","nextFalse":null},{"id":"n3vcm4jg","kind":"Branch","x":1290,"y":300,"p":{"var":"lives","op":">","value":0},"next":"n4520qbl","nextFalse":"nb2ui0ua"},{"id":"n4520qbl","kind":"LoadLevel","x":1540,"y":300,"p":{"level":"__restart","endText":"YOU WIN!\\nSCORE {score}"},"next":null,"nextFalse":null},{"id":"nb2ui0ua","kind":"ShowMessage","x":1540,"y":490,"p":{"text":"GAME OVER","seconds":2},"next":"ng7n0zk6","nextFalse":null},{"id":"ng7n0zk6","kind":"Delay","x":1790,"y":490,"p":{"seconds":2},"next":"n6wyxnbb","nextFalse":null},{"id":"n6wyxnbb","kind":"SetVar","x":2040,"y":490,"p":{"var":"lives","value":3},"next":"njtxw5tk","nextFalse":null},{"id":"njtxw5tk","kind":"SetVar","x":2290,"y":490,"p":{"var":"score","value":0},"next":"nsf1dcfp","nextFalse":null},{"id":"nsf1dcfp","kind":"LoadLevel","x":2540,"y":490,"p":{"level":"__first","endText":"YOU WIN!\\nSCORE {score}"},"next":null,"nextFalse":null},{"id":"ncw2rjxi","kind":"Overlap","x":40,"y":720,"p":{"tag":"fireball"},"next":"nat9i4p0","nextFalse":null},{"id":"nat9i4p0","kind":"PlaySound","x":290,"y":720,"p":{"sound":"ap4wrvac"},"next":"nxqk4bbh","nextFalse":null},{"id":"nxqk4bbh","kind":"Particles","x":540,"y":720,"p":{"color":13,"count":16},"next":"nung3yel","nextFalse":null},{"id":"nung3yel","kind":"AddVar","x":790,"y":720,"p":{"var":"score","amount":50},"next":"nwe0q93i","nextFalse":null},{"id":"nwe0q93i","kind":"Destroy","x":1040,"y":720,"p":{"target":"other"},"next":"npv79uov","nextFalse":null},{"id":"npv79uov","kind":"Destroy","x":1290,"y":720,"p":{"target":"self"},"next":null,"nextFalse":null}]}},{"id":"omhkyr4o","name":"Goal Flag","sprite":"sdl39xe8","x":360,"y":120,"tags":"goal","template":false,"comps":{},"bp":{"nodes":[{"id":"nuqq1k47","kind":"Overlap","x":40,"y":60,"p":{"tag":"player"},"next":"nex6zi7m","nextFalse":null},{"id":"nex6zi7m","kind":"PlaySound","x":290,"y":60,"p":{"sound":"au2gyfnb"},"next":"nr7e8dh1","nextFalse":null},{"id":"nr7e8dh1","kind":"Particles","x":540,"y":60,"p":{"color":12,"count":20},"next":"ny9lfg4b","nextFalse":null},{"id":"ny9lfg4b","kind":"ShowMessage","x":790,"y":60,"p":{"text":"LEVEL CLEAR!","seconds":2},"next":"nhzwkzqy","nextFalse":null},{"id":"nhzwkzqy","kind":"Delay","x":1040,"y":60,"p":{"seconds":2},"next":"n7t0jetd","nextFalse":null},{"id":"n7t0jetd","kind":"LoadLevel","x":1290,"y":60,"p":{"level":"__next","endText":"YOU WIN!\\nSCORE {score}"},"next":null,"nextFalse":null}]}}]}],"_templates":null}, { title: true });</script>
+</body></html>
