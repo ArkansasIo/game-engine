@@ -24,6 +24,67 @@ Open this folder in VS Code and press **F5** to launch the engine in Chrome or E
 (the configurations are in `.vscode/launch.json`). You can also install the recommended
 **Live Server** extension and choose *Open with Live Server* on `index.html`.
 
+## Source layout
+
+The engine is plain HTML, CSS and JavaScript. There are no dependencies and no build step is needed
+to run it: `index.html` loads the source files directly, even from `file://`.
+
+```text
+game-engine/
+├── index.html                  # Editor markup; loads the files below in order
+├── src/
+│   ├── css/editor.css          # Editor theme and layout
+│   ├── runtime/runtime.js      # Game runtime (window.PixelRuntime), embedded verbatim in packaged games
+│   └── editor/
+│       ├── util.js             # DOM helpers ($, h, uid, clone)
+│       ├── nodes.js            # Blueprint node definitions
+│       ├── default-project.js  # Sample game "Crystal Quest", empty database, Place Actors templates
+│       ├── database.js         # RPG Maker-style Database editor (F9)
+│       ├── state.js            # Editor state, undo/redo, autosave, output log
+│       ├── tabs.js             # Center tab strip
+│       ├── panels.js           # Place Actors, Levels, Outliner
+│       ├── details.js          # Details panel, components, World Settings
+│       ├── drawer.js           # Content drawer (sprites, sounds, log)
+│       ├── tools.js            # Tools, placement, duplicate/delete
+│       ├── viewport.js         # Level viewport rendering and input
+│       ├── play.js             # Play In Editor
+│       ├── blueprint.js        # Blueprint graph editor
+│       ├── sprite-editor.js    # 8×8 pixel editor
+│       ├── sound-editor.js     # Chiptune SFX editor
+│       ├── files.js            # Save/open/new project, Package Game
+│       ├── commands.js         # Menus, toolbar, keyboard shortcuts
+│       └── main.js             # Boot
+├── tools/
+│   ├── build.mjs               # Bundles everything into dist/bitforge8.html
+│   └── check.mjs               # Syntax-checks every source file
+├── dist/bitforge8.html         # Single-file build (generated; easy to share)
+└── examples/                   # Games exported with Package Game
+```
+
+The editor scripts are classic (non-module) scripts that share one global scope, so the
+order in `index.html` matters only for code that runs at load time. `main.js` boots last.
+
+### Runtime map (`src/runtime/runtime.js`)
+
+| Section | What it does |
+| --- | --- |
+| Palette, bitmap font, sprite cache | 16-color palette, 3×5 pixel font, 8×8 sprite rendering |
+| Audio | Web Audio chiptune synth (square/triangle/saw/noise) and master volume |
+| `create()` core | Level loading, actors, tile collision, physics controllers, overlaps, camera |
+| RPG systems | Hero stats and levels, combat, skills, monster AI, loot, quests, NPCs, chests, save/load |
+| In-game UI | Window stack, Dragon Warrior command menus, WoW/MU panels, tooltips, shops, HUD |
+| Blueprint interpreter | `exec()` runs node graphs, with Delay and blocking dialogue |
+| Main loop | Fixed 60 Hz update, render, input |
+
+### Build and check
+
+Requires Node.js 18 or newer (only for these optional scripts):
+
+```bash
+npm run check   # syntax-check all source files
+npm run build   # write dist/bitforge8.html (everything inlined into one file)
+```
+
 ## Engine specs
 
 | | |
