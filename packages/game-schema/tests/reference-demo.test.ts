@@ -11,6 +11,14 @@ const referenceGame = () => assertSourceGame({
 });
 
 describe('reference multi-plane demonstration', () => {
+  it('defines the reference pause-menu tabs and usable submenu destinations', () => {
+    const tabs = referenceGame().ui.pauseMenu.tabs;
+    expect(tabs.map(tab => tab.id)).toEqual(['character', 'inventory', 'quests', 'system']);
+    expect(tabs.flatMap(tab => tab.submenus?.map(submenu => submenu.id) || [])).toEqual([
+      'status', 'party', 'items', 'equipment', 'journal', 'log', 'save', 'load', 'controls',
+    ]);
+  });
+
   it('uses the RPG Maker tilesets and four-layer map defaults', () => {
     const game = referenceGame();
     expect(Object.keys(game.tilesets)).toEqual([

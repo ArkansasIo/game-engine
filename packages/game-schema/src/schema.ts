@@ -304,10 +304,12 @@ const GameTypesSchema: z.ZodType<GameTypes> = z.object({
   armors: TypeCatalogSchema,
   equipment: TypeCatalogSchema,
 }).strict();
+const PauseMenuSubmenuSchema = z.object({ id: Id, label: Id, description: Id.optional() }).strict();
+const PauseMenuTabSchema = z.object({ id: Id, label: Id, submenus: z.array(PauseMenuSubmenuSchema).optional() }).strict();
 const UiSchema: z.ZodType<UiDefinition> = z.object({
   theme: z.object({ fontFamily: Id, pageBackground: Id, panel: Id, panelBorder: Id, text: Id, accent: Id, health: Id }).strict(),
   hud: z.object({ slots: z.array(Id) }).strict(),
-  pauseMenu: z.object({ title: Id, tabs: z.array(z.object({ id: Id, label: Id }).strict()).min(1) }).strict(),
+  pauseMenu: z.object({ title: Id, tabs: z.array(PauseMenuTabSchema).min(1) }).strict(),
   battle: z.object({ background: BattleBackgroundSchema.optional() }).strict().optional(),
 }).strict();
 const ObjectiveSchema: z.ZodType<Objective> = z.object({ conditions: z.array(ConditionSchema).optional(), text: Id }).strict();

@@ -190,7 +190,7 @@ export function createEmptyProject(title: string, requestedId?: string, combatMo
     actors: { player: { id: 1, name: 'Player', start: { x: 1.5, y: 1.5, planeId: 'plane-1' }, stats: { maxHp: 100, attack: 0, defense: 0, level: 1, xp: 0 }, primaryAttack: 1, skillSlots: {}, unlockedSkills: [1] } },
     enemies: {}, troops: {}, skills: { 1: { name: 'Basic attack', type: 'melee', damage: 10, cooldown: 0.4, range: 1 } }, items: {}, quests: {},
     types: createDefaultGameTypes(),
-    ui: { theme: { fontFamily: 'sans-serif', pageBackground: '#0b1020', panel: '#172033', panelBorder: '#334155', text: '#f8fafc', accent: '#6ee7b7', health: '#ef4444' }, hud: { slots: ['health', 'level'] }, pauseMenu: { title: title, tabs: [{ id: 'status', label: 'Status' }] } },
+    ui: { theme: { fontFamily: 'sans-serif', pageBackground: '#0b1020', panel: '#172033', panelBorder: '#334155', text: '#f8fafc', accent: '#6ee7b7', health: '#ef4444' }, hud: { slots: ['health', 'level'] }, pauseMenu: { title: title, tabs: [{ id: 'character', label: 'Character', submenus: [{ id: 'status', label: 'Status' }, { id: 'party', label: 'Party' }] }, { id: 'inventory', label: 'Inventory', submenus: [{ id: 'items', label: 'Items' }, { id: 'equipment', label: 'Equipment' }] }, { id: 'quests', label: 'Quests', submenus: [{ id: 'journal', label: 'Journal' }, { id: 'log', label: 'Adventure Log' }] }, { id: 'system', label: 'System', submenus: [{ id: 'save', label: 'Save' }, { id: 'load', label: 'Load' }, { id: 'controls', label: 'Controls' }] }] } },
     events: { objectives: [], commonEvents: {} }, initialState: { switches: {}, variables: {}, quests: {}, inventory: {}, equipment: {} },
   });
   return { game, assets: {} };

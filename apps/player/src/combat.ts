@@ -14,3 +14,7 @@ export function playerDamage(attack: number, equipmentAttack: number, skillDamag
 export function enemyDamage(attack: number, playerDefense: number, equipmentDefense: number) {
   return Math.max(1, attack - playerDefense - equipmentDefense);
 }
+
+export function guardDamage(damage: number, guarding: boolean) {
+  return guarding ? Math.ceil(damage / 2) : damage;
+}

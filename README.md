@@ -31,13 +31,16 @@ The project takes inspiration from RPG Maker's approachable, data-driven authori
 RPG Crafter currently includes:
 
 - a three-panel Studio with a map hierarchy, canvas, and property inspector;
+- detailed per-map settings for hierarchy, dimensions, ground appearance, defeat destinations, and weighted encounter tables;
 - layered top-down maps with multiple overlapping gameplay planes;
 - terrain painting and A1/A2/A4 autotile, A5, or arbitrary 48 px grid tileset imports;
 - per-cell and per-edge collision editing;
 - explicit navigation connections between floors, bridges, roofs, and other overlapping surfaces;
 - visual event placement with conditional pages and reusable JSON actions;
 - dialogue, choices, quests, switches, inventory, healing, notifications, and teleportation;
-- real-time combat with melee attacks, dashes, projectiles, area attacks, and multi-phase bosses;
+- configurable pause-menu tabs and nested screens for character status, party, inventory, equipment, quests, save/load, and controls;
+- action-RPG combat plus turn-based battles with skill/item target menus, guarding, escape, and multi-phase bosses;
+- RPG progression with character stats, equipment, skills, quests, and an MMORPG-inspired menu layout;
 - local browser saves and Studio drafts backed by IndexedDB;
 - keyboard and touch controls;
 - project validation, automated tests, and production builds across the monorepo.
@@ -141,7 +144,7 @@ Asset paths are relative to the project root. Imported and exported packages inc
 
 ## Project status
 
-RPG Crafter is under active development and is not yet a drop-in replacement for RPG Maker. The current version focuses on the core workflow: editing maps and events, managing assets, previewing a project, and running a complete action-RPG reference game in the browser.
+RPG Crafter is under active development and is not yet a drop-in replacement for RPG Maker. The current version focuses on the core workflow: editing maps and events, managing assets, previewing a project, and running a complete reference RPG in the browser. The runtime is single-player; online multiplayer, shared worlds, and server-side accounts are not implemented.
 
 File formats and editor behavior may still change between releases. If you build a project with the current version, keep the source package under version control.
 

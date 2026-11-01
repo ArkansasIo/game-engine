@@ -168,7 +168,7 @@ function NavigationPanel({ map, activePlaneId, onDeleteConnection }: { map: Game
   </div>;
 }
 
-export function StudioSidebar({ game, assetUrls, map, selectedMapId, selectedEventId, mode, selectedTerrain, activeLayerId, canPlay, onPlay, onSelectMap, onCreateMap, onRenameMap, onMoveMap, onReorderMap, onResizeMap, onChangeMapEncounters, onSelectEvent, onRenameEvent, onSelectTerrain, onSelectLayer, onAddLayer, onRenameLayer, onDeleteLayer, onMoveLayer, onChangeLayerPlane, onChangeLayerPhase, onAddPlane, onRenamePlane, onMovePlane, onDeletePlane, onChangeCoverage, onChangeSurface, onDeleteConnection }: {
+export function StudioSidebar({ game, assetUrls, map, selectedMapId, selectedEventId, mode, selectedTerrain, activeLayerId, canPlay, onPlay, onSelectMap, onCreateMap, onRenameMap, onMoveMap, onReorderMap, onResizeMap, onChangeMapEncounters, onChangeMapAppearance, onChangeMapDeathDestination, onSelectEvent, onRenameEvent, onSelectTerrain, onSelectLayer, onAddLayer, onRenameLayer, onDeleteLayer, onMoveLayer, onChangeLayerPlane, onChangeLayerPhase, onAddPlane, onRenamePlane, onMovePlane, onDeletePlane, onChangeCoverage, onChangeSurface, onDeleteConnection }: {
   game: SourceGame;
   assetUrls: Record<string, string>;
   map: GameMap;
@@ -186,6 +186,8 @@ export function StudioSidebar({ game, assetUrls, map, selectedMapId, selectedEve
   onReorderMap: (id: number, targetId: number, position: MapDropPosition) => void;
   onResizeMap: (id: number, width: number, height: number) => void;
   onChangeMapEncounters?: (id: number, encounters: NonNullable<GameMap['encounters']>) => void;
+  onChangeMapAppearance?: (id: number, appearance: Pick<GameMap, 'ground' | 'accent'>) => void;
+  onChangeMapDeathDestination?: (id: number, destination?: NonNullable<GameMap['deathDestination']>) => void;
   onSelectEvent: (id: number) => void;
   onRenameEvent: (id: number, name: string) => void;
   onSelectTerrain: (terrain: SelectedTerrain) => void;
@@ -213,7 +215,7 @@ export function StudioSidebar({ game, assetUrls, map, selectedMapId, selectedEve
   return <div data-slot="studio-sidebar" className="flex h-full min-h-0 cursor-default flex-col border-r bg-sidebar text-sidebar-foreground">
     <StudioProjectHeader title={game.manifest.title} combatMode={game.manifest.combatMode} canPlay={canPlay} onPlay={onPlay} />
     <div className="min-h-0 flex-1"><ResizablePanelGroup orientation="vertical">
-      <MapList game={game} selectedMapId={selectedMapId} open={mapsOpen} onOpenChange={setMapsOpen} onSelect={onSelectMap} onCreate={onCreateMap} onRename={onRenameMap} onMove={onMoveMap} onReorder={onReorderMap} onResize={onResizeMap} onChangeEncounters={onChangeMapEncounters || (() => undefined)} />
+      <MapList game={game} selectedMapId={selectedMapId} open={mapsOpen} onOpenChange={setMapsOpen} onSelect={onSelectMap} onCreate={onCreateMap} onRename={onRenameMap} onMove={onMoveMap} onReorder={onReorderMap} onResize={onResizeMap} onChangeEncounters={onChangeMapEncounters || (() => undefined)} onChangeAppearance={onChangeMapAppearance} onChangeDeathDestination={onChangeMapDeathDestination} />
       <ResizableHandle disabled={!mapsOpen} />
       <ResizablePanel defaultSize="75%" minSize="160px" className="min-h-0">{editorPanel}</ResizablePanel>
     </ResizablePanelGroup></div>

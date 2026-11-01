@@ -240,6 +240,28 @@ describe('StudioSidebar', () => {
     expect(onResizeMap).toHaveBeenCalledWith(1, 10, 8);
   });
 
+  it('edits map colors and configures a defeat destination', async () => {
+    const destinationMap: GameMap = {
+      ...structuredClone(map),
+      id: 2,
+      name: 'Sanctuary',
+      planes: [{ id: 'sanctuary-plane', name: 'Sanctuary', order: 0, surfaceLayerId: 'ground', surfaceCoverage: 'bounds' }],
+    };
+    const mapsGame = { ...game, maps: { 1: map, 2: destinationMap } } as unknown as SourceGame;
+    const onChangeMapAppearance = vi.fn();
+    const onChangeMapDeathDestination = vi.fn();
+    render(<StudioSidebar {...common} game={mapsGame} mode="drawing" onChangeMapAppearance={onChangeMapAppearance} onChangeMapDeathDestination={onChangeMapDeathDestination} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Map settings: Village' }));
+
+    fireEvent.change(screen.getByLabelText('Map ground color'), { target: { value: '#123456' } });
+    expect(onChangeMapAppearance).toHaveBeenCalledWith(1, expect.objectContaining({ ground: '#123456', accent: '#ffffff' }));
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Defeat destination map' }), '2');
+    expect(onChangeMapDeathDestination).toHaveBeenCalledWith(1, {
+      mapId: 2,
+      spawn: { x: 0.5, y: 0.5, planeId: 'sanctuary-plane' },
+    });
+  });
+
   it('renames a map inline on double click', async () => {
     const onRenameMap = vi.fn();
     render(<StudioSidebar {...common} mode="drawing" onRenameMap={onRenameMap} />);

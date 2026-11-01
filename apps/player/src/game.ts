@@ -4,7 +4,7 @@ import { MapEventRuntime, teleportDisposition, type RuntimeEvent } from './event
 import { EventMovementRuntime, type MovementActorId } from './event-movement.js';
 import { conditionsMet as evaluateConditions } from './conditions.js';
 import { conditionalCommands } from './conditional.js';
-import { battleBackgroundImage, enemyDamage, playerDamage } from './combat.js';
+import { battleBackgroundImage, enemyDamage, guardDamage, playerDamage } from './combat.js';
 import { CommonEventRuntime, commonEventCallDepthWarning } from './common-event-runtime.js';
 import { PixiRenderer } from './pixi-renderer.js';
 import { resolveTeleport, runTeleportFade, teleportFacing } from './teleport.js';
@@ -19,7 +19,7 @@ void (async () => {
   canvas.tabIndex = 0;
 
   const ui = {
-    dialogue: document.querySelector<HTMLElement>('#dialogue')!, speaker: document.querySelector<HTMLElement>('#dialogue-speaker')!, text: document.querySelector<HTMLElement>('#dialogue-text')!, choices: document.querySelector<HTMLElement>('#dialogue-choices')!, toast: document.querySelector<HTMLElement>('#toast')!, objective: document.querySelector<HTMLElement>('#objective')!, mapName: document.querySelector<HTMLElement>('#map-name')!, skillStatus: document.querySelector<HTMLElement>('#skill-status')!, pause: document.querySelector<HTMLElement>('#pause-menu')!, pauseTitle: document.querySelector<HTMLElement>('#pause-title')!, pauseTabs: document.querySelector<HTMLElement>('#pause-tabs')!, pauseContent: document.querySelector<HTMLElement>('#pause-content')!, devGrid: document.querySelector<HTMLButtonElement>('#dev-grid-toggle')!, teleportTransition: document.querySelector<HTMLElement>('#teleport-transition')!, battle: document.querySelector<HTMLElement>('#battle')!, battleField: document.querySelector<HTMLElement>('#battle-field')!, battleStatus: document.querySelector<HTMLElement>('#battle-status')!, battleMenu: document.querySelector<HTMLElement>('#battle-menu')!
+    dialogue: document.querySelector<HTMLElement>('#dialogue')!, speaker: document.querySelector<HTMLElement>('#dialogue-speaker')!, text: document.querySelector<HTMLElement>('#dialogue-text')!, choices: document.querySelector<HTMLElement>('#dialogue-choices')!, toast: document.querySelector<HTMLElement>('#toast')!, objective: document.querySelector<HTMLElement>('#objective')!, mapName: document.querySelector<HTMLElement>('#map-name')!, skillStatus: document.querySelector<HTMLElement>('#skill-status')!, pause: document.querySelector<HTMLElement>('#pause-menu')!, pauseTitle: document.querySelector<HTMLElement>('#pause-title')!, pauseTabs: document.querySelector<HTMLElement>('#pause-tabs')!, pauseSubmenus: document.querySelector<HTMLElement>('#pause-submenus')!, pauseContent: document.querySelector<HTMLElement>('#pause-content')!, devGrid: document.querySelector<HTMLButtonElement>('#dev-grid-toggle')!, teleportTransition: document.querySelector<HTMLElement>('#teleport-transition')!, battle: document.querySelector<HTMLElement>('#battle')!, battleField: document.querySelector<HTMLElement>('#battle-field')!, battleStatus: document.querySelector<HTMLElement>('#battle-status')!, battleMenu: document.querySelector<HTMLElement>('#battle-menu')!
   };
   const keys = new Set<string>();
   const studioPreview = isStudioPreview();
@@ -44,9 +44,9 @@ void (async () => {
     revision: number;
   };
   type BattleEnemy = EnemyTemplate & { battleId: string; hp: number; maxHp: number; x: number; y: number };
-  type BattleState = { enemies: BattleEnemy[]; process?: CommandProcess; message: string; background?: Troop['background']; pendingSkillId?: number };
+  type BattleState = { enemies: BattleEnemy[]; process?: CommandProcess; message: string; background?: Troop['background']; pendingSkillId?: number; defending?: boolean };
   const BATTLE_PACING = { actorAdvance: 420, actorReady: 220, attack: 1120, attackImpact: 340, postAttack: 280, actorRetreat: 420, betweenSides: 480, enemyAdvance: 300, enemyReady: 160, betweenEnemies: 360, nextTurn: 350, victory: 450 } as const;
-  let content: LoadedGame, game: any, renderer: Renderer, eventRuntime: MapEventRuntime, commonEventRuntime: CommonEventRuntime, movementRuntime: EventMovementRuntime, visitRevision = 0, dialogue: { choices: Array<{ label: string; commands: EventCommand[] }>; choiceIndex: number; process?: CommandProcess } | null = null, battle: BattleState | null = null, battleAnimating = false, battlePlayerForward = false, paused = false, transitioning = false, pauseTabIndex = 0, inventorySelection = 0, encounterSteps = 0, encounterThreshold = 1, lastTime = performance.now(), toastTimer = 0, showTileGrid = false, playerMoving = false, playerAnimationTime = 0;
+  let content: LoadedGame, game: any, renderer: Renderer, eventRuntime: MapEventRuntime, commonEventRuntime: CommonEventRuntime, movementRuntime: EventMovementRuntime, visitRevision = 0, dialogue: { choices: Array<{ label: string; commands: EventCommand[] }>; choiceIndex: number; process?: CommandProcess } | null = null, battle: BattleState | null = null, battleAnimating = false, battlePlayerForward = false, paused = false, transitioning = false, pauseTabIndex = 0, pauseSubmenuIndex = 0, inventorySelection = 0, encounterSteps = 0, encounterThreshold = 1, lastTime = performance.now(), toastTimer = 0, showTileGrid = false, playerMoving = false, playerAnimationTime = 0;
   const eventProcesses = new Map<string, CommandProcess>();
   let facing = { x: 0, y: 1 };
   const cooldowns: Record<string, number> = {};
@@ -106,8 +106,18 @@ void (async () => {
   function currentMapPlaneExists(mapId: number, planeId: string) { return content.maps[mapId]?.planes.some(plane => plane.id === planeId) ?? false; }
   function loadGame() {
     if (studioPreview) return freshGame();
-    try { const saved = JSON.parse(localStorage.getItem(saveKey()) || 'null'); if (isValidSave(saved)) return saved; } catch { /* invalid or unavailable storage */ }
+    const saved = readSavedGame();
+    if (saved) return saved;
     return freshGame();
+  }
+  function readSavedGame() {
+    if (studioPreview) return null;
+    try {
+      const saved = JSON.parse(localStorage.getItem(saveKey()) || 'null');
+      return isValidSave(saved) ? saved : null;
+    } catch {
+      return null;
+    }
   }
   function activeEvents(useRuntimePosition = true): ActiveEvent[] {
     return currentMap().events.flatMap(event => {
@@ -344,6 +354,8 @@ void (async () => {
       battleButton('Attack', () => chooseBattleSkill(content.player.primaryAttack));
       battleButton('Skills', () => renderBattle('skills'));
       battleButton('Items', () => renderBattle('items'));
+      battleButton('Defend', defendBattleTurn);
+      battleButton('Escape', attemptEscapeBattle);
     }
     if (menu === 'skills') {
       game.unlockedSkills.forEach((skillId: number) => battleButton(content.skills[skillId]?.name || String(skillId), () => chooseBattleSkill(skillId)));
@@ -424,6 +436,27 @@ void (async () => {
     battleAnimating = true; ui.battleMenu.inert = true; game.inventory[itemId] -= 1; const healing = item.healing || 0, previousHp = game.player.hp, nextHp = Math.min(game.player.maxHp, game.player.hp + healing);
     battle.message = item.name; ui.battleStatus.textContent = item.name; await animateImpact('player', previousHp, nextHp, game.player.maxHp, nextHp - previousHp, true); game.player.hp = nextHp; battle.message = `${item.name}: +${nextHp - previousHp} HP`; await finishBattleRound();
   }
+  async function defendBattleTurn() {
+    if (!battle || battleAnimating) return;
+    battle.defending = true;
+    battle.message = `${content.player.name} defends`;
+    await finishBattleRound();
+  }
+  async function attemptEscapeBattle() {
+    if (!battle || battleAnimating) return;
+    if (Math.random() < 0.5) {
+      const process = battle.process;
+      closeTurnBattle();
+      showToast('Escaped safely');
+      if (process && eventProcesses.get(process.key) === process) {
+        process.blocked = false;
+        advanceProcess(process, 0);
+      }
+      return;
+    }
+    battle.message = 'Escape failed';
+    await finishBattleRound();
+  }
   async function finishBattleRound() {
     if (!battle) return;
     await wait(BATTLE_PACING.postAttack);
@@ -435,7 +468,9 @@ void (async () => {
     let totalDamage = 0;
     for (const enemy of battle.enemies.filter(enemy => enemy.hp > 0)) {
       if (!battle) return;
-      const damage = enemyDamage(enemy.stats.attack, content.player.stats.defense, equippedStat('defense')), previousHp = game.player.hp, nextHp = Math.max(0, previousHp - damage);
+      const baseDamage = enemyDamage(enemy.stats.attack, content.player.stats.defense, equippedStat('defense'));
+      const damage = guardDamage(baseDamage, battle.defending === true);
+      const previousHp = game.player.hp, nextHp = Math.max(0, previousHp - damage);
       battle.message = `${enemy.name} attacks`; ui.battleStatus.textContent = battle.message;
       actorElement(enemy.battleId)?.classList.add('battle-active');
       await wait(BATTLE_PACING.enemyAdvance + BATTLE_PACING.enemyReady);
@@ -450,6 +485,7 @@ void (async () => {
       await wait(BATTLE_PACING.betweenEnemies);
     }
     battle.message = `Enemies: ${totalDamage} damage`;
+    battle.defending = false;
     await wait(BATTLE_PACING.nextTurn);
     await beginPlayerBattleTurn();
   }
@@ -504,22 +540,225 @@ void (async () => {
   function closePause() { paused = false; ui.pause.classList.add('hidden'); canvas.focus(); }
   function togglePause() { if (paused) closePause(); else openPause(); }
   function renderPause() {
-    const tabs = content.ui.pauseMenu.tabs; const tab = tabs[pauseTabIndex]; ui.pauseTitle.textContent = content.ui.pauseMenu.title;
-    ui.pauseTabs.innerHTML = ''; tabs.forEach((item, index) => { const button = document.createElement('button'); const selected = index === pauseTabIndex; button.textContent = item.label; button.className = selected ? 'active' : ''; button.setAttribute('role', 'tab'); button.setAttribute('aria-controls', 'pause-content'); button.setAttribute('aria-selected', String(selected)); button.tabIndex = selected ? 0 : -1; button.addEventListener('click', () => { pauseTabIndex = index; inventorySelection = 0; renderPause(); }); ui.pauseTabs.append(button); });
-    if (tab.id === 'character') ui.pauseContent.innerHTML = `<h2>${content.player.name}</h2><p>Niveau ${game.player.level} · ${Math.ceil(game.player.hp)} / ${game.player.maxHp} PV</p><p>Compétences : ${game.unlockedSkills.map((id: number) => content.skills[id].name).join(', ')}</p>`;
-    if (tab.id === 'inventory') renderInventory();
-    if (tab.id === 'equipment') renderEquipment();
-    if (tab.id === 'quests') ui.pauseContent.innerHTML = `<h2>Quêtes</h2><ul class="pause-list">${Object.entries(game.quests).map(([id, state]) => `<li><strong>${content.quests[id]?.name || id}</strong><br><small>${state}</small></li>`).join('')}</ul>`;
-    if (tab.id === 'settings') ui.pauseContent.innerHTML = '<h2>Options</h2><p>Les réglages d’accessibilité, audio et affichage seront fournis par le Player.</p>';
+    const tabs = content.ui.pauseMenu.tabs;
+    pauseTabIndex = Math.min(pauseTabIndex, tabs.length - 1);
+    const tab = tabs[pauseTabIndex];
+    const submenus = tab.submenus?.length ? tab.submenus : [{ id: tab.id, label: tab.label }];
+    pauseSubmenuIndex = Math.min(pauseSubmenuIndex, submenus.length - 1);
+    const submenu = submenus[pauseSubmenuIndex];
+    ui.pauseTitle.textContent = content.ui.pauseMenu.title;
+    ui.pauseTabs.replaceChildren();
+    tabs.forEach((item, index) => {
+      const button = document.createElement('button');
+      const selected = index === pauseTabIndex;
+      button.textContent = item.label;
+      button.className = selected ? 'active' : '';
+      button.setAttribute('role', 'tab');
+      button.setAttribute('aria-controls', 'pause-content');
+      button.setAttribute('aria-selected', String(selected));
+      button.tabIndex = selected ? 0 : -1;
+      button.addEventListener('click', () => { pauseTabIndex = index; pauseSubmenuIndex = 0; inventorySelection = 0; renderPause(); });
+      ui.pauseTabs.append(button);
+    });
+    ui.pauseSubmenus.replaceChildren();
+    submenus.forEach((item, index) => {
+      const button = document.createElement('button');
+      button.textContent = item.label;
+      button.className = index === pauseSubmenuIndex ? 'active' : '';
+      button.setAttribute('aria-pressed', String(index === pauseSubmenuIndex));
+      button.addEventListener('click', () => { pauseSubmenuIndex = index; inventorySelection = 0; renderPause(); });
+      ui.pauseSubmenus.append(button);
+    });
+
+    const pageId = submenu.id;
+    if (tab.id === 'character' || pageId === 'status' || pageId === 'party') {
+      if (pageId === 'party') renderParty();
+      else renderCharacterStatus();
+    } else if (tab.id === 'inventory' || pageId === 'items' || pageId === 'equipment') {
+      if (pageId === 'equipment' || tab.id === 'equipment') renderEquipment();
+      else renderInventory();
+    } else if (tab.id === 'quests' || pageId === 'journal' || pageId === 'log') {
+      if (pageId === 'log') renderQuestLog();
+      else renderQuestJournal();
+    } else if (pageId === 'save') renderSaveMenu();
+    else if (pageId === 'load') renderLoadMenu();
+    else if (pageId === 'controls' || pageId === 'options' || pageId === 'settings') renderControls();
+    else if (pageId === 'audio') renderAudioMenu();
+    else renderCustomMenu(tab.label, submenu.label, submenu.description);
+  }
+  function menuHeading(title: string, description?: string) {
+    ui.pauseContent.replaceChildren();
+    const heading = document.createElement('h2');
+    heading.textContent = title;
+    ui.pauseContent.append(heading);
+    if (description) {
+      const paragraph = document.createElement('p');
+      paragraph.textContent = description;
+      ui.pauseContent.append(paragraph);
+    }
+  }
+  function menuAction(label: string, action: () => void, disabled = false) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'menu-action';
+    button.textContent = label;
+    button.disabled = disabled;
+    button.addEventListener('click', action);
+    ui.pauseContent.append(button);
+  }
+  function menuList(entries: Array<{ title: string; detail?: string }>) {
+    const list = document.createElement('ul');
+    list.className = 'pause-list';
+    entries.forEach(entry => {
+      const item = document.createElement('li');
+      const title = document.createElement('strong');
+      title.textContent = entry.title;
+      item.append(title);
+      if (entry.detail) {
+        const detail = document.createElement('small');
+        detail.textContent = entry.detail;
+        item.append(document.createElement('br'), detail);
+      }
+      list.append(item);
+    });
+    ui.pauseContent.append(list);
+  }
+  function renderCharacterStatus() {
+    menuHeading(content.player.name, `Level ${game.player.level} · ${Math.ceil(game.player.hp)} / ${game.player.maxHp} HP`);
+    menuList([
+      { title: 'Experience', detail: `${game.player.xp} XP` },
+      { title: 'Attack', detail: String(content.player.stats.attack + equippedStat('attack')) },
+      { title: 'Defense', detail: String(content.player.stats.defense + equippedStat('defense')) },
+      { title: 'Skills', detail: game.unlockedSkills.map((id: number) => content.skills[id]?.name).filter(Boolean).join(', ') || 'No skills learned' },
+    ]);
+  }
+  function renderParty() {
+    menuHeading('Party', 'Active party members');
+    menuList([{ title: content.player.name, detail: `Level ${game.player.level} · ${Math.ceil(game.player.hp)} / ${game.player.maxHp} HP` }]);
+  }
+  function questEntries() {
+    return Object.entries(game.quests).map(([id, state]) => ({ title: content.quests[id]?.name || `Quest ${id}`, detail: String(state) }));
+  }
+  function renderQuestJournal() {
+    menuHeading('Quest Journal', 'Quest states are updated by game events.');
+    const entries = questEntries();
+    menuList(entries.length ? entries : [{ title: 'No quests recorded' }]);
+  }
+  function renderQuestLog() {
+    menuHeading('Adventure Log', 'Current location and objective');
+    menuList([
+      { title: 'Location', detail: currentMap().name },
+      { title: 'Current objective', detail: objective() || 'No active objective' },
+      ...questEntries(),
+    ]);
+  }
+  function renderSaveMenu() {
+    menuHeading('Save Game', studioPreview ? 'Saving is disabled in Studio preview.' : 'Save your current progress to this browser.');
+    menuAction('Save to browser', saveGame, studioPreview);
+  }
+  function renderLoadMenu() {
+    const saved = readSavedGame();
+    menuHeading('Load Game', studioPreview ? 'Loading saves is disabled in Studio preview.' : saved ? `Saved progress found at ${content.maps[saved.mapId]?.name || 'Unknown map'}.` : 'No valid saved game was found in this browser.');
+    menuAction('Load saved game', loadSavedGame, studioPreview || !saved);
+  }
+  function loadSavedGame() {
+    const saved = readSavedGame();
+    if (!saved) {
+      showToast('No valid saved game found');
+      renderPause();
+      return;
+    }
+    game = saved;
+    closeDialogue();
+    closeTurnBattle();
+    initializeEventRuntime();
+    resetEncounterThreshold();
+    refreshHud();
+    showToast('Saved game loaded');
+    renderPause();
+  }
+  function renderControls() {
+    menuHeading('Controls', 'Keyboard shortcuts');
+    menuList([
+      { title: 'Move', detail: 'WASD or Arrow keys' },
+      { title: 'Interact', detail: 'E or Enter' },
+      { title: 'Attack', detail: 'Space' },
+      { title: 'Dash', detail: 'K' },
+      { title: 'Skills', detail: 'L and I' },
+      { title: 'Pause menu', detail: 'Escape' },
+      { title: 'Save game', detail: 'Ctrl/Command + S' },
+    ]);
+  }
+  function renderAudioMenu() {
+    menuHeading('Audio', 'Audio playback and volume controls are not available in this runtime yet.');
+  }
+  function renderCustomMenu(tabLabel: string, submenuLabel: string, description?: string) {
+    menuHeading(submenuLabel || tabLabel, description || `${tabLabel} section`);
   }
   function inventoryEntries() { return Object.entries(game.inventory).filter(([, amount]) => Number(amount) > 0).map(([id, amount]) => [Number(id), amount] as [number, number]); }
   function equipmentTypeName(typeId: number | undefined) { return content.types.equipment.entries.find(type => type.id === typeId)?.name || ''; }
-  function renderInventory() { const entries = inventoryEntries(); ui.pauseContent.innerHTML = `<h2>Inventaire</h2><ul class="pause-list">${entries.map(([id, amount], index) => { const item = content.items[id]; const hint = item?.type === 'equipment' ? `Entrée : équiper (${equipmentTypeName(item.equipmentTypeId)})` : item?.type === 'consumable' ? 'Entrée : utiliser' : item?.type || ''; return `<li class="${index === inventorySelection ? 'selected' : ''}"><strong>${item?.name || id}</strong> ×${amount}<br><small>${hint}</small></li>`; }).join('') || '<li>Inventaire vide.</li>'}</ul>`; }
-  function renderEquipment() { ui.pauseContent.innerHTML = `<h2>Équipement</h2><ul class="pause-list">${content.types.equipment.entries.map(type => { const id = game.equipment[type.id]; return `<li><strong>${type.name}</strong><br><small>${id ? content.items[id]?.name || id : 'Aucun équipement'}</small></li>`; }).join('')}</ul>`; }
+  function renderInventory() {
+    menuHeading('Items', 'Select an item and press Enter to use or equip it.');
+    const entries = inventoryEntries();
+    const list = document.createElement('ul');
+    list.className = 'pause-list';
+    entries.forEach(([id, amount], index) => {
+      const item = content.items[id];
+      const row = document.createElement('li');
+      row.className = index === inventorySelection ? 'selected' : '';
+      const title = document.createElement('strong');
+      title.textContent = `${item?.name || id} ×${amount}`;
+      const detail = document.createElement('small');
+      detail.textContent = item?.type === 'equipment' ? `Enter: equip (${equipmentTypeName(item.equipmentTypeId)})` : item?.type === 'consumable' ? 'Enter: use' : item?.type || '';
+      row.append(title, document.createElement('br'), detail);
+      row.addEventListener('click', () => { inventorySelection = index; activateSelectedItem(); });
+      list.append(row);
+    });
+    if (!entries.length) {
+      const empty = document.createElement('li');
+      empty.textContent = 'Inventory is empty.';
+      list.append(empty);
+    }
+    ui.pauseContent.append(list);
+  }
+  function renderEquipment() {
+    menuHeading('Equipment', 'Currently equipped gear');
+    menuList(content.types.equipment.entries.map(type => {
+      const id = game.equipment[type.id];
+      return { title: type.name, detail: id ? content.items[id]?.name || String(id) : 'Nothing equipped' };
+    }));
+  }
   function equipSelectedItem() { const [id] = inventoryEntries()[inventorySelection] || []; const item = content.items[id]; if (!item?.equipmentTypeId) return; game.equipment[item.equipmentTypeId] = id; saveSilently(); showToast(`${item.name} équipé`); renderPause(); }
   function useSelectedItem() { const [id, amount] = inventoryEntries()[inventorySelection] || []; const item = content.items[id]; if (!item || amount < 1 || item.type !== 'consumable') return; game.inventory[id] -= 1; if (item.healing) game.player.hp = Math.min(game.player.maxHp, game.player.hp + item.healing); saveSilently(); showToast(`${item.name} utilisé`); renderPause(); }
   function activateSelectedItem() { const [id] = inventoryEntries()[inventorySelection] || []; if (content.items[id]?.type === 'equipment') equipSelectedItem(); else useSelectedItem(); }
-  function handlePauseKey(event: KeyboardEvent) { const tabs = content.ui.pauseMenu.tabs; if (event.code === 'Escape') return closePause(); if (event.code === 'ArrowLeft' || event.code === 'ArrowRight') { pauseTabIndex = (pauseTabIndex + (event.code === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length; inventorySelection = 0; return renderPause(); } if (tabs[pauseTabIndex].id === 'inventory' && (event.code === 'ArrowUp' || event.code === 'ArrowDown')) { const count = inventoryEntries().length || 1; inventorySelection = (inventorySelection + (event.code === 'ArrowDown' ? 1 : -1) + count) % count; return renderPause(); } if (tabs[pauseTabIndex].id === 'inventory' && (event.code === 'Enter' || event.code === 'Space')) activateSelectedItem(); }
+  function handlePauseKey(event: KeyboardEvent) {
+    const tabs = content.ui.pauseMenu.tabs;
+    const tab = tabs[pauseTabIndex];
+    const submenus = tab.submenus?.length ? tab.submenus : [{ id: tab.id, label: tab.label }];
+    const pageId = submenus[pauseSubmenuIndex]?.id;
+    if (event.code === 'Escape') return closePause();
+    if (event.code === 'ArrowLeft' || event.code === 'ArrowRight') {
+      pauseTabIndex = (pauseTabIndex + (event.code === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+      pauseSubmenuIndex = 0;
+      inventorySelection = 0;
+      return renderPause();
+    }
+    if (event.code === 'ArrowUp' || event.code === 'ArrowDown') {
+      if (tab.id === 'inventory' && (pageId === 'items' || pageId === tab.id)) {
+        const count = inventoryEntries().length;
+        if (!count) return;
+        inventorySelection = (inventorySelection + (event.code === 'ArrowDown' ? 1 : -1) + count) % count;
+      } else {
+        pauseSubmenuIndex = (pauseSubmenuIndex + (event.code === 'ArrowDown' ? 1 : -1) + submenus.length) % submenus.length;
+        inventorySelection = 0;
+      }
+      return renderPause();
+    }
+    if (event.code === 'Enter' || event.code === 'Space') {
+      if (tab.id === 'inventory' && (pageId === 'items' || pageId === tab.id)) activateSelectedItem();
+      else ui.pauseContent.querySelector<HTMLButtonElement>('.menu-action:not(:disabled)')?.click();
+    }
+  }
 
   function eventCallbacks(events: ActiveEvent[]) {
     const byId = new Map(events.map(event => [event.id, event]));

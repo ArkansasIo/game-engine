@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { battleBackgroundImage, enemyDamage, playerDamage } from '../src/combat.js';
+import { battleBackgroundImage, enemyDamage, guardDamage, playerDamage } from '../src/combat.js';
 
 describe('combat damage', () => {
   it('layers the transparent battlebacks2 backdrop over the battlebacks1 ground', () => {
@@ -20,5 +20,11 @@ describe('combat damage', () => {
   it('always deals at least one damage', () => {
     expect(playerDamage(1, 0, 0, 99)).toBe(1);
     expect(enemyDamage(1, 99, 99)).toBe(1);
+  });
+
+  it('halves incoming damage while guarding and rounds up', () => {
+    expect(guardDamage(7, true)).toBe(4);
+    expect(guardDamage(8, true)).toBe(4);
+    expect(guardDamage(7, false)).toBe(7);
   });
 });

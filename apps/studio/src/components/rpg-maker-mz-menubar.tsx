@@ -1,7 +1,8 @@
-import { Database, FolderOpen, Image, Play, Save, Upload } from 'lucide-react';
+import { Database, FolderOpen, Grid3X3, Image, Maximize2, Play, Redo2, Save, Undo2, Upload } from 'lucide-react';
 import {
   Menubar,
   MenubarContent,
+  MenubarCheckboxItem,
   MenubarItem,
   MenubarMenu,
   MenubarRadioGroup,
@@ -16,11 +17,15 @@ import {
 import type { EditorMode } from '@/components/studio-sidebar';
 import type { StudioInterface } from '@/lib/studio-interface';
 
-export function RpgMakerMzMenubar({ title, hasProject, canExport, mode, studioInterface, onNewProject, onOpenProject, onSaveDraft, onExportProject, onRevertProject, onCloseProject, onChangeMode, onOpenMapSettings, onOpenAssets, onOpenDatabase, onPlay, onChangeStudioInterface }: {
+export function RpgMakerMzMenubar({ title, hasProject, canExport, mode, canUndo, canRedo, gridVisible, dimInactiveLayers, studioInterface, onNewProject, onOpenProject, onSaveDraft, onExportProject, onRevertProject, onCloseProject, onChangeMode, onUndo, onRedo, onToggleGrid, onToggleDimInactiveLayers, onFitMap, onOpenMapSettings, onOpenAssets, onOpenDatabase, onPlay, onChangeStudioInterface }: {
   title?: string;
   hasProject: boolean;
   canExport: boolean;
   mode: EditorMode;
+  canUndo: boolean;
+  canRedo: boolean;
+  gridVisible: boolean;
+  dimInactiveLayers: boolean;
   studioInterface: StudioInterface;
   onNewProject: () => void;
   onOpenProject: () => void;
@@ -29,6 +34,11 @@ export function RpgMakerMzMenubar({ title, hasProject, canExport, mode, studioIn
   onRevertProject: () => void;
   onCloseProject: () => void;
   onChangeMode: (mode: EditorMode) => void;
+  onUndo: () => void;
+  onRedo: () => void;
+  onToggleGrid: () => void;
+  onToggleDimInactiveLayers: () => void;
+  onFitMap: () => void;
   onOpenMapSettings: () => void;
   onOpenAssets: () => void;
   onOpenDatabase: () => void;
@@ -61,12 +71,28 @@ export function RpgMakerMzMenubar({ title, hasProject, canExport, mode, studioIn
           </MenubarContent>
         </MenubarMenu>
         <MenubarMenu>
+          <MenubarTrigger>Edit</MenubarTrigger>
+          <MenubarContent sideOffset={3}>
+            <MenubarItem disabled={!canUndo} onClick={onUndo}><Undo2 />Undo<MenubarShortcut>⌘Z</MenubarShortcut></MenubarItem>
+            <MenubarItem disabled={!canRedo} onClick={onRedo}><Redo2 />Redo<MenubarShortcut>⇧⌘Z</MenubarShortcut></MenubarItem>
+          </MenubarContent>
+        </MenubarMenu>
+        <MenubarMenu>
           <MenubarTrigger>Mode</MenubarTrigger>
           <MenubarContent sideOffset={3}>
             <MenubarRadioGroup value={mode} onValueChange={value => onChangeMode(value as EditorMode)}>
               <MenubarRadioItem value="drawing">Map</MenubarRadioItem>
               <MenubarRadioItem value="events">Event</MenubarRadioItem>
             </MenubarRadioGroup>
+          </MenubarContent>
+        </MenubarMenu>
+        <MenubarMenu>
+          <MenubarTrigger>View</MenubarTrigger>
+          <MenubarContent sideOffset={3}>
+            <MenubarCheckboxItem checked={gridVisible} onCheckedChange={onToggleGrid}><Grid3X3 />Show Grid</MenubarCheckboxItem>
+            <MenubarCheckboxItem checked={dimInactiveLayers} onCheckedChange={onToggleDimInactiveLayers}>Dim Inactive Layers</MenubarCheckboxItem>
+            <MenubarSeparator />
+            <MenubarItem disabled={!hasProject} onClick={onFitMap}><Maximize2 />Fit Map</MenubarItem>
           </MenubarContent>
         </MenubarMenu>
         <MenubarMenu>

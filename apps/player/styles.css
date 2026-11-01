@@ -75,8 +75,13 @@ canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; 
 .pause-tabs { display: flex; flex-wrap: wrap; gap: 7px; }
 .pause-tabs button { padding: 8px 11px; color: var(--ui-text); background: transparent; border: 1px solid var(--ui-border); border-radius: 7px; cursor: pointer; }
 .pause-tabs button.active, .pause-tabs button:hover { background: var(--ui-accent); color: #08101e; border-color: var(--ui-accent); }
+.pause-submenus { display: flex; flex-wrap: wrap; gap: 6px; }
+.pause-submenus button { padding: 6px 9px; color: var(--ui-text); background: color-mix(in srgb, var(--ui-panel) 75%, transparent); border: 1px solid var(--ui-border); border-radius: 6px; cursor: pointer; }
+.pause-submenus button.active, .pause-submenus button:hover, .pause-submenus button:focus-visible { color: #08101e; background: var(--ui-accent); border-color: var(--ui-accent); outline: none; }
 .pause-content { min-height: 170px; padding: 15px; border: 1px solid var(--ui-border); border-radius: 10px; background: #07101c80; }
 .pause-content h2 { margin: 0 0 12px; font-size: 1.1rem; }.pause-content p { margin: 6px 0; }.pause-list { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }.pause-list li { padding: 8px 10px; border-radius: 7px; }.pause-list li.selected { background: color-mix(in srgb, var(--ui-accent) 25%, transparent); outline: 1px solid var(--ui-accent); }.pause-list small { color: #aebdda; }.pause-hint { margin: 0; color: #aebdda; font-size: .78rem; }
+.pause-content .menu-action { margin: 8px 8px 0 0; padding: 8px 12px; color: var(--ui-text); border: 1px solid var(--ui-border); border-radius: 7px; background: var(--ui-panel); cursor: pointer; }
+.pause-content .menu-action:hover, .pause-content .menu-action:focus-visible { border-color: var(--ui-accent); outline: 2px solid color-mix(in srgb, var(--ui-accent) 35%, transparent); }
 
 @media (max-width: 720px) {
   .dialogue { left: 2%; right: 2%; bottom: 2%; padding: 12px; font-size: .9rem; }.pause-menu { inset: 2%; padding: 15px; }

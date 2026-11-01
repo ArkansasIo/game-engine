@@ -32,7 +32,7 @@ function props(overrides: Partial<ComponentProps<typeof DatabaseManager>> = {}):
     onCreateSkill: vi.fn(() => 2), onUpdateSkill: vi.fn(), onDuplicateSkill: vi.fn(() => 2), onDeleteSkill: vi.fn(),
     battleAssets: [], onImportBattleAsset: vi.fn(async () => undefined),
     onCreateEnemy: vi.fn(() => 1), onUpdateEnemy: vi.fn(), onDuplicateEnemy: vi.fn(() => 1), onDeleteEnemy: vi.fn(),
-    onCreateTroop: vi.fn(() => 1), onUpdateTroop: vi.fn(), onDuplicateTroop: vi.fn(() => 1), onDeleteTroop: vi.fn(), onBattleTest: vi.fn(), onUpdateDefaultBattleBackground: vi.fn(),
+    onCreateTroop: vi.fn(() => 1), onUpdateTroop: vi.fn(), onDuplicateTroop: vi.fn(), onDeleteTroop: vi.fn(), onBattleTest: vi.fn(), onUpdateDefaultBattleBackground: vi.fn(), onUpdatePauseMenu: vi.fn(),
     onCreateCommonEvent: vi.fn(() => 2), onUpdateCommonEvent: vi.fn(), onDuplicateCommonEvent: vi.fn(() => 2), onDeleteCommonEvent: vi.fn(),
     onCreateType: vi.fn(() => 1), onRenameType: vi.fn(), onDeleteType: vi.fn(),
     onRenameVariable: vi.fn(), onRenameSwitch: vi.fn(), onCreateSwitch: vi.fn(() => 2), onCreateVariable: vi.fn(() => 2),
@@ -271,6 +271,23 @@ describe('DatabaseManager', () => {
     expect(values.onImportBattleAsset).toHaveBeenCalledWith(lower);
     expect(values.onImportBattleAsset).toHaveBeenCalledWith(upper);
     expect(values.onUpdateDefaultBattleBackground).toHaveBeenCalledWith({ lowerImage: 'battle/forest-ground.png', upperImage: 'battle/forest-backdrop.png' });
+  });
+
+  it('creates configurable pause-menu tabs and nested sections from System', async () => {
+    const values = props();
+    render(<DatabaseManager {...values} />);
+    const menu = screen.getByRole('navigation', { name: 'Database sections' });
+    await userEvent.click(within(menu).getByRole('button', { name: 'System' }));
+    expect(screen.getByRole('textbox', { name: 'Pause menu title' })).toHaveValue(values.game.ui.pauseMenu.title);
+    await userEvent.click(screen.getByRole('button', { name: 'Add tab' }));
+    expect(values.onUpdatePauseMenu).toHaveBeenCalledWith(expect.objectContaining({
+      tabs: expect.arrayContaining([
+        expect.objectContaining({
+          label: 'New tab',
+          submenus: expect.arrayContaining([expect.objectContaining({ label: 'Overview' })]),
+        }),
+      ]),
+    }));
   });
 
   it('blocks enemy deletion while a troop references it', async () => {

@@ -10,6 +10,10 @@ function props(overrides: Partial<ComponentProps<typeof RpgMakerMzMenubar>> = {}
     hasProject: true,
     canExport: true,
     mode: 'drawing' as const,
+    canUndo: true,
+    canRedo: true,
+    gridVisible: false,
+    dimInactiveLayers: true,
     studioInterface: 'rpgMakerMz' as const,
     onNewProject: vi.fn(),
     onOpenProject: vi.fn(),
@@ -18,6 +22,11 @@ function props(overrides: Partial<ComponentProps<typeof RpgMakerMzMenubar>> = {}
     onRevertProject: vi.fn(),
     onCloseProject: vi.fn(),
     onChangeMode: vi.fn(),
+    onUndo: vi.fn(),
+    onRedo: vi.fn(),
+    onToggleGrid: vi.fn(),
+    onToggleDimInactiveLayers: vi.fn(),
+    onFitMap: vi.fn(),
     onOpenMapSettings: vi.fn(),
     onOpenAssets: vi.fn(),
     onOpenDatabase: vi.fn(),
@@ -44,5 +53,27 @@ describe('RpgMakerMzMenubar', () => {
     await userEvent.hover(await screen.findByRole('menuitem', { name: 'Interface' }));
     await userEvent.click(await screen.findByRole('menuitemradio', { name: 'Modern' }));
     expect(onChangeStudioInterface).toHaveBeenCalledWith('modern');
+  });
+
+  it('exposes undo, redo, and map view controls', async () => {
+    const values = props();
+    render(<RpgMakerMzMenubar {...values} />);
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Edit' }));
+    await userEvent.click(await screen.findByRole('menuitem', { name: /Undo/ }));
+    expect(values.onUndo).toHaveBeenCalledOnce();
+
+    await userEvent.click(screen.getByRole('menuitem', { name: 'View' }));
+    await userEvent.click(await screen.findByRole('menuitemcheckbox', { name: /Show Grid/ }));
+    expect(values.onToggleGrid).toHaveBeenCalledOnce();
+    await userEvent.hover(screen.getByRole('menuitem', { name: 'View' }));
+    await userEvent.click(await screen.findByRole('menuitem', { name: /Fit Map/ }));
+    expect(values.onFitMap).toHaveBeenCalledOnce();
+  });
+
+  it('disables history actions when there is no drawing history', async () => {
+    render(<RpgMakerMzMenubar {...props({ canUndo: false, canRedo: false })} />);
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Edit' }));
+    expect(await screen.findByRole('menuitem', { name: /Undo/ })).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByRole('menuitem', { name: /Redo/ })).toHaveAttribute('aria-disabled', 'true');
   });
 });

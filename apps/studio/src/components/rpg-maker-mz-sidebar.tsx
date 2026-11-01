@@ -4,7 +4,7 @@ import { TilePalette, type SelectedTerrain } from '@/components/studio-sidebar';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
 import type { MapDropPosition } from '@/lib/map-hierarchy';
 
-export function RpgMakerMzSidebar({ game, assetUrls, selectedMapId, activeLayer, selectedTerrain, onSelectTerrain, onSelectMap, onCreateMap, onRenameMap, onMoveMap, onReorderMap, onResizeMap, onChangeMapEncounters }: {
+export function RpgMakerMzSidebar({ game, assetUrls, selectedMapId, activeLayer, selectedTerrain, onSelectTerrain, onSelectMap, onCreateMap, onRenameMap, onMoveMap, onReorderMap, onResizeMap, onChangeMapEncounters, onChangeMapAppearance, onChangeMapDeathDestination }: {
   game: SourceGame;
   assetUrls: Record<string, string>;
   selectedMapId: number;
@@ -18,6 +18,8 @@ export function RpgMakerMzSidebar({ game, assetUrls, selectedMapId, activeLayer,
   onReorderMap: (id: number, targetId: number, position: MapDropPosition) => void;
   onResizeMap: (id: number, width: number, height: number) => void;
   onChangeMapEncounters: (id: number, encounters: NonNullable<GameMap['encounters']>) => void;
+  onChangeMapAppearance: (id: number, appearance: Pick<GameMap, 'ground' | 'accent'>) => void;
+  onChangeMapDeathDestination: (id: number, destination?: NonNullable<GameMap['deathDestination']>) => void;
 }) {
   return <aside className="flex h-full min-h-0 w-[300px] shrink-0 flex-col border-r bg-sidebar text-sidebar-foreground" aria-label="RPG Maker MZ map tools">
     <ResizablePanelGroup orientation="vertical">
@@ -26,7 +28,7 @@ export function RpgMakerMzSidebar({ game, assetUrls, selectedMapId, activeLayer,
         <TilePalette game={game} assetUrls={assetUrls} activeLayer={activeLayer} selectedTerrain={selectedTerrain} onSelect={onSelectTerrain} />
       </ResizablePanel>
       <ResizableHandle />
-      <MapList game={game} selectedMapId={selectedMapId} onSelect={onSelectMap} onCreate={onCreateMap} onRename={onRenameMap} onMove={onMoveMap} onReorder={onReorderMap} onResize={onResizeMap} onChangeEncounters={onChangeMapEncounters} />
+      <MapList game={game} selectedMapId={selectedMapId} onSelect={onSelectMap} onCreate={onCreateMap} onRename={onRenameMap} onMove={onMoveMap} onReorder={onReorderMap} onResize={onResizeMap} onChangeEncounters={onChangeMapEncounters} onChangeAppearance={onChangeMapAppearance} onChangeDeathDestination={onChangeMapDeathDestination} />
     </ResizablePanelGroup>
   </aside>;
 }

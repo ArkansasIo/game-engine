@@ -12,11 +12,23 @@
   "pauseMenu": {
     "title": "Menu",
     "tabs": [
-      { "id": "character", "label": "Character" },
-      { "id": "inventory", "label": "Inventory" },
-      { "id": "equipment", "label": "Equipment" },
-      { "id": "quests", "label": "Quests" },
-      { "id": "settings", "label": "Options" }
+      { "id": "character", "label": "Character", "submenus": [
+        { "id": "status", "label": "Status", "description": "Vitals, party, and rank" },
+        { "id": "party", "label": "Party", "description": "Group composition and support" }
+      ] },
+      { "id": "inventory", "label": "Inventory", "submenus": [
+        { "id": "items", "label": "Items", "description": "Consumables and quest inventory" },
+        { "id": "equipment", "label": "Equipment", "description": "Weapons, armor, and gear" }
+      ] },
+      { "id": "quests", "label": "Quests", "submenus": [
+        { "id": "journal", "label": "Journal", "description": "Current missions and goals" },
+        { "id": "log", "label": "Adventure Log", "description": "Current location and objective" }
+      ] },
+      { "id": "system", "label": "System", "submenus": [
+        { "id": "save", "label": "Save", "description": "Save your progress in this browser" },
+        { "id": "load", "label": "Load", "description": "Load saved progress from this browser" },
+        { "id": "controls", "label": "Controls", "description": "View keyboard controls" }
+      ] }
     ]
   },
   "battle": {

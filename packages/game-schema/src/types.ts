@@ -265,10 +265,12 @@ export function createDefaultGameTypes(): GameTypes {
     equipment: catalog(['Weapon', 'Shield', 'Head', 'Body', 'Accessory']),
   };
 }
+export type PauseMenuSubmenu = { id: string; label: string; description?: string };
+export type PauseMenuTab = { id: string; label: string; submenus?: PauseMenuSubmenu[] };
 export type UiDefinition = {
   theme: { fontFamily: string; pageBackground: string; panel: string; panelBorder: string; text: string; accent: string; health: string };
   hud: { slots: string[] };
-  pauseMenu: { title: string; tabs: Array<{ id: string; label: string }> };
+  pauseMenu: { title: string; tabs: PauseMenuTab[] };
   battle?: { background?: BattleBackground };
 };
 export type GameIdCounters = { maps: number; actors: number; enemies: number; troops: number; skills: number; items: number; quests: number; commonEvents: number; switches: number; variables: number };

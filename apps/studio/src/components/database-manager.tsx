@@ -43,6 +43,7 @@ export type DatabaseManagerProps = {
   onDeleteTroop: (id: number) => void;
   onBattleTest: (id: number) => void;
   onUpdateDefaultBattleBackground: (background?: BattleBackground) => void;
+  onUpdatePauseMenu: (pauseMenu: SourceGame['ui']['pauseMenu']) => void;
   onCreateCommonEvent: (name: string) => number;
   onUpdateCommonEvent: (id: number, commonEvent: CommonEvent) => void;
   onDuplicateCommonEvent: (id: number) => number;
@@ -266,17 +267,37 @@ function TroopForm({ id, troop, game, battleAssets, assetUrls, onImportBattleAss
   </>;
 }
 
-function SystemSection({ game, battleAssets, assetUrls, onImportBattleAsset, onUpdateDefaultBattleBackground }: Pick<DatabaseManagerProps, 'game' | 'battleAssets' | 'assetUrls' | 'onImportBattleAsset' | 'onUpdateDefaultBattleBackground'>) {
+function SystemSection({ game, battleAssets, assetUrls, onImportBattleAsset, onUpdateDefaultBattleBackground, onUpdatePauseMenu }: Pick<DatabaseManagerProps, 'game' | 'battleAssets' | 'assetUrls' | 'onImportBattleAsset' | 'onUpdateDefaultBattleBackground' | 'onUpdatePauseMenu'>) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const backgrounds = battleAssets.filter(asset => asset.assetType.startsWith('battle-background'));
   const defaultBackground = game.ui.battle?.background;
   const backgroundStyle = battleBackgroundStyle(defaultBackground, backgrounds, assetUrls);
+  const updatePauseMenu = (updater: (menu: SourceGame['ui']['pauseMenu']) => SourceGame['ui']['pauseMenu']) => onUpdatePauseMenu(updater(game.ui.pauseMenu));
   return <>
     <section className="flex min-h-0 flex-col bg-background">
       <div className="flex h-12 shrink-0 items-center border-b px-4"><h2 className="text-sm font-semibold">System</h2></div>
       <div className="min-h-0 flex-1 overflow-y-auto"><div className="mx-auto grid max-w-2xl gap-6 p-8">
         <div className="flex items-center gap-3 border-b pb-5"><div className="grid size-10 shrink-0 place-items-center rounded-md bg-primary/10 text-primary"><Settings className="size-5" /></div><div><h3 className="text-base font-semibold">Battle</h3><p className="text-[10px] text-muted-foreground">Shared settings used by every troop.</p></div></div>
         <Field label="Default background" description="Troops without a custom background use this composed scene."><div className="grid gap-3">{backgroundStyle && <div role="img" aria-label="Default battle background" className="aspect-video w-full max-w-sm border bg-muted/20 bg-cover bg-center [image-rendering:pixelated]" style={backgroundStyle} />}<div className="flex gap-2"><Toggle pressed={pickerOpen} onPressedChange={setPickerOpen} variant="outline"><Images />Choose default</Toggle>{defaultBackground && <Button type="button" variant="ghost" onClick={() => onUpdateDefaultBattleBackground(undefined)}><X />Clear</Button>}</div></div></Field>
+        <div className="grid gap-4 border-t pt-6"><div className="flex items-center gap-3"><div className="grid size-10 shrink-0 place-items-center rounded-md bg-primary/10 text-primary"><Database className="size-5" /></div><div><h3 className="text-base font-semibold">Menu layout</h3><p className="text-[10px] text-muted-foreground">Configure the pause menu title and nested submenu entries.</p></div></div>
+          <Field label="Menu title"><BufferedTextInput value={game.ui.pauseMenu.title} ariaLabel="Pause menu title" onCommit={title => updatePauseMenu(menu => ({ ...menu, title: title.trim() || menu.title }))} /></Field>
+          <div className="space-y-3">
+            {game.ui.pauseMenu.tabs.map((tab, tabIndex) => <div key={tab.id || tabIndex} className="rounded-md border p-3">
+              <div className="mb-2 flex items-center justify-between gap-2"><h4 className="text-sm font-medium">{tab.label}</h4><Button type="button" variant="ghost" onClick={() => updatePauseMenu(menu => ({ ...menu, tabs: menu.tabs.filter((_, index) => index !== tabIndex) }))}><Trash2 />Remove</Button></div>
+              <div className="grid gap-3">
+                <Field label="Tab label"><BufferedTextInput value={tab.label} ariaLabel={`Tab label ${tabIndex + 1}`} onCommit={label => updatePauseMenu(menu => ({ ...menu, tabs: menu.tabs.map((item, index) => index === tabIndex ? { ...item, label: label.trim() || item.label } : item) }))} /></Field>
+                <div className="space-y-2">
+                  {(tab.submenus || []).map((submenu, submenuIndex) => <div key={submenu.id || submenuIndex} className="rounded-sm border bg-muted/20 p-2">
+                    <div className="mb-2 flex items-center justify-between gap-2"><span className="text-[10px] uppercase tracking-wide text-muted-foreground">Submenu</span><Button type="button" variant="ghost" onClick={() => updatePauseMenu(menu => ({ ...menu, tabs: menu.tabs.map((item, index) => index === tabIndex ? { ...item, submenus: (item.submenus || []).filter((_, targetIndex) => targetIndex !== submenuIndex) } : item) }))}><X />Delete</Button></div>
+                    <div className="grid gap-2"><Field label="Submenu label"><BufferedTextInput value={submenu.label} ariaLabel={`Submenu label ${submenuIndex + 1}`} onCommit={label => updatePauseMenu(menu => ({ ...menu, tabs: menu.tabs.map((item, index) => index === tabIndex ? { ...item, submenus: (item.submenus || []).map((entry, targetIndex) => targetIndex === submenuIndex ? { ...entry, label: label.trim() || entry.label } : entry) } : item) }))} /></Field><Field label="Subtitle"><BufferedTextInput value={submenu.description || ''} ariaLabel={`Submenu description ${submenuIndex + 1}`} onCommit={description => updatePauseMenu(menu => ({ ...menu, tabs: menu.tabs.map((item, index) => index === tabIndex ? { ...item, submenus: (item.submenus || []).map((entry, targetIndex) => targetIndex === submenuIndex ? { ...entry, description: description.trim() || undefined } : entry) } : item) }))} /></Field></div>
+                  </div>)}
+                  <Button type="button" variant="outline" onClick={() => updatePauseMenu(menu => ({ ...menu, tabs: menu.tabs.map((item, index) => index === tabIndex ? { ...item, submenus: [...(item.submenus || []), { id: `submenu-${Date.now()}`, label: 'New submenu', description: 'Describe this section' }] } : item) }))}><Plus />Add submenu</Button>
+                </div>
+              </div>
+            </div>)}
+            <Button type="button" variant="outline" onClick={() => updatePauseMenu(menu => ({ ...menu, tabs: [...menu.tabs, { id: `tab-${Date.now()}`, label: 'New tab', submenus: [{ id: `submenu-${Date.now()}`, label: 'Overview', description: 'New section' }] }] }))}><Plus />Add tab</Button>
+          </div>
+        </div>
       </div></div>
     </section>
     <BattleBackgroundPicker open={pickerOpen} title="Default battle background" assets={backgrounds} initial={defaultBackground} onOpenChange={setPickerOpen} onSelect={async (next, selectedAssets) => { await Promise.all(selectedAssets.map(asset => onImportBattleAsset(asset))); onUpdateDefaultBattleBackground(next); setPickerOpen(false); }} />
@@ -469,7 +490,7 @@ export function DatabaseManager(props: DatabaseManagerProps) {
           </nav></SidebarContent>
         </Sidebar>
       </SidebarProvider>
-      {section === 'system' ? <div className="min-h-0"><SystemSection game={game} battleAssets={props.battleAssets} assetUrls={props.assetUrls} onImportBattleAsset={props.onImportBattleAsset} onUpdateDefaultBattleBackground={props.onUpdateDefaultBattleBackground} /></div> : section === 'tilesets' ? <div className="min-h-0"><ProjectTilesetManager game={game} assetUrls={props.assetUrls} onImportLocal={props.onImportLocal} onUpdate={props.onUpdate} onChangeTerrainCollision={props.onChangeTerrainCollision} /></div> : section === 'types' ? <div className="min-h-0"><TypesSection game={game} category={typeCategory} onCreateType={props.onCreateType} onRenameType={props.onRenameType} onDeleteType={props.onDeleteType} /></div> : <div className="grid min-h-0 grid-cols-2"><aside className="flex min-h-0 flex-col border-r bg-background" data-slot="database-entry-table">
+      {section === 'system' ? <div className="min-h-0"><SystemSection game={game} battleAssets={props.battleAssets} assetUrls={props.assetUrls} onImportBattleAsset={props.onImportBattleAsset} onUpdateDefaultBattleBackground={props.onUpdateDefaultBattleBackground} onUpdatePauseMenu={props.onUpdatePauseMenu} /></div> : section === 'tilesets' ? <div className="min-h-0"><ProjectTilesetManager game={game} assetUrls={props.assetUrls} onImportLocal={props.onImportLocal} onUpdate={props.onUpdate} onChangeTerrainCollision={props.onChangeTerrainCollision} /></div> : section === 'types' ? <div className="min-h-0"><TypesSection game={game} category={typeCategory} onCreateType={props.onCreateType} onRenameType={props.onRenameType} onDeleteType={props.onDeleteType} /></div> : <div className="grid min-h-0 grid-cols-2"><aside className="flex min-h-0 flex-col border-r bg-background" data-slot="database-entry-table">
           <div className="flex h-12 shrink-0 items-center gap-2 border-b px-4"><h2 className="min-w-0 flex-1 truncate text-sm font-semibold">{sectionLabels[section]}</h2>{(section === 'items' || section === 'skills' || section === 'enemies' || section === 'troops' || section === 'commonEvents') && <Button type="button" size="icon-sm" aria-label={`Create ${section === 'items' ? 'item' : section === 'skills' ? 'skill' : section === 'enemies' ? 'enemy' : section === 'troops' ? 'troop' : 'common event'}`} onClick={() => setCreateOpen(true)}><Plus /></Button>}</div>
           <div className="shrink-0 border-b p-3"><div className="relative"><Search className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" /><Input type="search" className="pl-7" aria-label={`Search ${section}`} placeholder={`Search ${section}…`} value={query} onChange={event => setQueries(current => ({ ...current, [section]: event.target.value }))} /></div></div>
           {visibleEntries.length ? <div className="min-h-0 flex-1 overflow-auto"><Table aria-label={sectionLabels[section]}><TableHeader><TableRow><TableHead className="pl-4">ID</TableHead><TableHead>Name</TableHead><TableHead>{detailColumnLabel(section as Exclude<DatabaseSection, 'tilesets' | 'types'>)}</TableHead></TableRow></TableHeader><TableBody>{visibleEntries.map(([id, entry]) => <TableRow key={id} data-state={id === selectedId ? 'selected' : undefined} aria-selected={id === selectedId} className="cursor-pointer" onClick={() => setSelectedIds(current => ({ ...current, [section]: id }))}><TableCell className="pl-4 font-mono text-muted-foreground">{id}</TableCell><TableCell className="font-medium">{entry.name}</TableCell><TableCell className="capitalize text-muted-foreground">{entryDetail(section as Exclude<DatabaseSection, 'tilesets' | 'types'>, entry)}</TableCell></TableRow>)}</TableBody></Table></div> : <div className="grid min-h-0 flex-1 place-items-center p-6 text-center text-xs text-muted-foreground">{query ? `No ${section} match your search.` : `No ${section} yet.`}</div>}
